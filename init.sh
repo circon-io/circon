@@ -15,7 +15,106 @@
 
 set -e
 
+# ==============================================================================
+# STEP 0: INTERACTIVE CONFIGURATION
+# Every question the script will ever ask is asked here, before the first
+# package is installed, so the ~30 minute install runs start-to-finish
+# unattended. Nothing below this block blocks on input.
+# ==============================================================================
+
+configure() {
+  echo "=========================================================================="
+  echo "⚙️  CONFIGURATION — answer these now, then you can walk away."
+  echo "=========================================================================="
+  echo ""
+
+  # --- 1/3 Anthropic API key --------------------------------------------------
+  echo "🔑 [1/3] Anthropic API Key"
+  echo "    Powers the Architect (Sonnet) phase of the ralph loop."
+  read -rsp "    Paste your API key (hidden, empty to skip): " CFG_ANTHROPIC_KEY
+  echo ""
+  if [ -n "$CFG_ANTHROPIC_KEY" ]; then
+    echo "    ✅ Captured."
+  else
+    echo "    ⚠️ Skipped — export ANTHROPIC_API_KEY yourself before running ralph."
+  fi
+  echo ""
+
+  # --- 2/3 Remote Desktop -----------------------------------------------------
+  echo "🖥️  [2/3] Remote Desktop (RDP from macOS)"
+  echo "    Gateway credentials for the login screen; you still sign in with"
+  echo "    your normal Linux account afterwards."
+  read -rp "    RDP username [$USER]: " CFG_RDP_USER
+  CFG_RDP_USER=${CFG_RDP_USER:-$USER}
+  read -rsp "    RDP password (hidden, empty to auto-generate): " CFG_RDP_PASS
+  echo ""
+  if [ -z "$CFG_RDP_PASS" ]; then
+    CFG_RDP_PASS=$(LC_ALL=C tr -dc "A-Za-z0-9" < /dev/urandom | head -c 16)
+    CFG_RDP_PASS_GENERATED=1
+    echo "    🔐 Generated a random password (printed again at the end)."
+  else
+    CFG_RDP_PASS_GENERATED=""
+    echo "    ✅ Captured."
+  fi
+  echo ""
+
+  # --- 3/3 Telegram -----------------------------------------------------------
+  echo "📨 [3/3] Telegram Reporting (optional)"
+  echo "    Bot token from @BotFather, chat ID from @userinfobot."
+  read -rp "    Configure Telegram now? [y/N]: " CFG_TG_REPLY
+  if [[ $CFG_TG_REPLY =~ ^[Yy] ]]; then
+    read -rsp "    Bot token (hidden): " CFG_TG_TOKEN
+    echo ""
+    read -rp "    Chat ID: " CFG_TG_CHAT
+
+    # Validate now so a typo surfaces here, not in three days of silence
+    if [ -n "$CFG_TG_TOKEN" ] && [ -n "$CFG_TG_CHAT" ]; then
+      if curl -sf --max-time 10 \
+           "https://api.telegram.org/bot$CFG_TG_TOKEN/getMe" > /dev/null 2>&1; then
+        echo "    ✅ Token accepted by Telegram."
+      else
+        echo "    ⚠️ Telegram rejected that token. Saving it anyway — fix it later"
+        echo "       in ~/.config/solyd/telegram.env"
+      fi
+    else
+      echo "    ⚠️ Token or chat ID missing. Skipping Telegram."
+      CFG_TG_TOKEN=""
+    fi
+  else
+    CFG_TG_TOKEN=""
+    echo "    ⚠️ Skipped."
+  fi
+  echo ""
+}
+
+# Defaults, so every later step has a usable value even when nothing is asked
+CFG_RDP_USER="$USER"
+CFG_RDP_PASS=$(LC_ALL=C tr -dc "A-Za-z0-9" < /dev/urandom | head -c 16)
+CFG_RDP_PASS_GENERATED=1
+
+# Read answers from the terminal even when piped (curl ... | bash). Opening
+# /dev/tty is the real test — it can exist but be unusable with no controlling
+# terminal, so -r alone is not enough.
+if [ -t 0 ]; then
+  configure
+elif { : < /dev/tty; } 2>/dev/null; then
+  configure < /dev/tty
+else
+  echo "⚠️ No terminal available — continuing with defaults, nothing prompted."
+  echo "   RDP user '$USER' with a generated password (shown at the end)."
+fi
+
+# Prime sudo and keep the timestamp warm, so no password prompt interrupts the
+# install halfway through the NVIDIA driver or the Android Studio snap.
+sudo -v
+while true; do sudo -n true; sleep 50; kill -0 "$$" 2>/dev/null || exit; done 2>/dev/null &
+SUDO_KEEPALIVE_PID=$!
+trap 'kill "$SUDO_KEEPALIVE_PID" 2>/dev/null || true' EXIT
+
+echo "=========================================================================="
 echo "🚀 Starting Full AI & Software Development Environment Setup..."
+echo "   Configuration is done — the rest runs unattended."
+echo "=========================================================================="
 
 # 1. System Updates & Essential Utilities
 echo "📦 [1/11] Updating System & Installing Essential Tools..."
@@ -142,6 +241,17 @@ PROJECT_NAME=$(basename "$PWD")
 STARTED_AT=$(date +%s)
 COMMITS_MADE=0
 
+# Baselines so the report can describe exactly what THIS run changed
+START_COMMIT=$(git rev-parse HEAD 2>/dev/null || echo "")
+PROGRESS_START=$(wc -l < progress.txt 2>/dev/null | tr -d "[:space:]")
+PROGRESS_START=${PROGRESS_START:-0}
+
+LOG_DIR="$HOME/.local/state/ralph"
+mkdir -p "$LOG_DIR"
+RUN_LOG="$LOG_DIR/$PROJECT_NAME-$(date +%Y%m%d-%H%M%S).log"
+TEST_LOG="$LOG_DIR/.test-output.$$"
+trap "rm -f \"$TEST_LOG\"" EXIT
+
 # Telegram reporting is optional: no config, no output, no failure
 notify() {
   command -v solyd-notify > /dev/null 2>&1 && solyd-notify "$1"
@@ -151,6 +261,28 @@ notify() {
 elapsed() {
   local secs=$(( $(date +%s) - STARTED_AT ))
   printf "%dh %dm" $((secs / 3600)) $(( (secs % 3600) / 60 ))
+}
+
+# The commits this run produced. Subjects carry the PRD task name, so this
+# doubles as the list of what actually got built.
+work_done() {
+  if [ -n "$START_COMMIT" ]; then
+    git log "$START_COMMIT"..HEAD --format="- %s" 2>/dev/null
+  else
+    git log --format="- %s" 2>/dev/null
+  fi
+}
+
+# Whatever the agent appended to progress.txt during this run: its own account
+# of what it did, in its own words.
+new_notes() {
+  local total
+  total=$(wc -l < progress.txt 2>/dev/null | tr -d "[:space:]")
+  total=${total:-0}
+  if [ "$total" -gt "$PROGRESS_START" ]; then
+    tail -n $((total - PROGRESS_START)) progress.txt \
+      | grep -v "ALL_TASKS_COMPLETE" | grep -v "^[[:space:]]*$" | tail -n 6
+  fi
 }
 
 echo "🚀 Starting Hybrid Ralph Loop (Max Iterations: $MAX_LOOPS)..."
@@ -165,6 +297,8 @@ for ((i=1; i<=MAX_LOOPS; i++)); do
 
   PROMPT="Pick the SINGLE highest-priority incomplete task from PRD.md. Implement ONLY that task. Update PRD.md and progress.txt with your changes. If all tasks are finished, append '\''ALL_TASKS_COMPLETE'\'' to progress.txt."
 
+  echo "--- iteration $i ---" >> "$RUN_LOG"
+
   # Execute Aider in Hybrid Architect Mode
   "$AIDER_BIN" PRD.md progress.txt \
         --architect \
@@ -172,7 +306,7 @@ for ((i=1; i<=MAX_LOOPS; i++)); do
         --editor-model "$EDITOR_MODEL" \
         --message "$PROMPT" \
         --yes-always \
-        --no-auto-commits
+        --no-auto-commits 2>&1 | tee -a "$RUN_LOG"
 
   echo "🧪 Running Backpressure Quality Gate..."
 
@@ -181,12 +315,27 @@ for ((i=1; i<=MAX_LOOPS; i++)); do
     TEST_CMD="true" # Pass automatically if no package.json exists yet
   fi
 
-  if eval "$TEST_CMD"; then
+  # Run to a file so the exit code survives and the output can be quoted in
+  # the failure alert
+  eval "$TEST_CMD" > "$TEST_LOG" 2>&1
+  TEST_STATUS=$?
+  cat "$TEST_LOG"
+  cat "$TEST_LOG" >> "$RUN_LOG"
+
+  if [ $TEST_STATUS -eq 0 ]; then
     echo "✅ Tests passed!"
     git add .
 
     if ! git diff --cached --quiet; then
-      git commit -m "ralph(iter-$i): completed automated task"
+      # Name the commit after the PRD task that just flipped to done, so the
+      # git log becomes a readable record of what the agent built
+      TASK_DONE=$(git diff --cached -U0 -- PRD.md \
+                  | grep "^+- \[[xX]\]" | head -1 | sed "s/^+- \[[xX]\][[:space:]]*//")
+      if [ -n "$TASK_DONE" ]; then
+        git commit -m "ralph(iter-$i): $TASK_DONE"
+      else
+        git commit -m "ralph(iter-$i): completed automated task"
+      fi
       COMMITS_MADE=$((COMMITS_MADE + 1))
       STUCK_COUNT=0
     else
@@ -205,8 +354,17 @@ for ((i=1; i<=MAX_LOOPS; i++)); do
       notify "🛑 ralph HALTED: $PROJECT_NAME
 Circuit breaker tripped after $STUCK_LIMIT consecutive test failures.
 Stopped at iteration $i of $MAX_LOOPS after $(elapsed).
-$COMMITS_MADE commits landed before the failure.
-Needs a human look."
+
+Completed before the failure ($COMMITS_MADE commits):
+$(work_done)
+
+Last agent notes:
+$(new_notes)
+
+Why it failed (tail of $TEST_CMD):
+$(tail -n 12 "$TEST_LOG" 2>/dev/null)
+
+Full log: $RUN_LOG"
       exit 1
     fi
   fi
@@ -214,11 +372,15 @@ Needs a human look."
   if grep -q "ALL_TASKS_COMPLETE" progress.txt 2>/dev/null; then
     echo "🎉 All tasks in PRD.md are completed! Exiting Ralph Loop successfully."
     notify "🎉 ralph FINISHED: $PROJECT_NAME
-All PRD tasks are complete.
-$i iterations, $COMMITS_MADE commits, $(elapsed) runtime.
+All PRD tasks complete — $i iterations, $COMMITS_MADE commits, $(elapsed).
 
-Last commits:
-$(git log -5 --format="- %s" 2>/dev/null)"
+What got done:
+$(work_done)
+
+Last agent notes:
+$(new_notes)
+
+Log: $RUN_LOG"
     ALL_DONE=1
     break
   fi
@@ -229,9 +391,19 @@ done
 if [ -z "$ALL_DONE" ]; then
   OPEN_TASKS=$(grep -c "^- \[ \]" PRD.md 2>/dev/null || true)
   notify "⏸️ ralph PAUSED: $PROJECT_NAME
-Hit the $MAX_LOOPS iteration limit with work still queued.
-$COMMITS_MADE commits, $(elapsed) runtime, ${OPEN_TASKS:-?} tasks still open.
-Run ralph again to continue."
+Hit the $MAX_LOOPS iteration limit — ${OPEN_TASKS:-?} tasks still open.
+$COMMITS_MADE commits, $(elapsed) runtime.
+
+What got done:
+$(work_done)
+
+Last agent notes:
+$(new_notes)
+
+Still open:
+$(grep "^- \[ \]" PRD.md 2>/dev/null | head -5)
+
+Run ralph again to continue. Log: $RUN_LOG"
 fi
 EOF'
 
@@ -247,16 +419,10 @@ if systemctl list-unit-files 2>/dev/null | grep -q '^xrdp'; then
   sudo systemctl disable --now xrdp xrdp-sesman 2>/dev/null || true
 fi
 
-# Collect connection credentials (defaults to the current user)
-read -rp "RDP username [$USER]: " RDP_USER
-RDP_USER=${RDP_USER:-$USER}
-read -rsp "RDP password (leave empty to auto-generate): " RDP_PASS
-echo ""
-if [ -z "$RDP_PASS" ]; then
-  RDP_PASS=$(openssl rand -base64 15)
-  RDP_PASS_GENERATED=1
-fi
-
+# Credentials were collected in step 0
+RDP_USER="$CFG_RDP_USER"
+RDP_PASS="$CFG_RDP_PASS"
+RDP_PASS_GENERATED="$CFG_RDP_PASS_GENERATED"
 RDP_SUMMARY=""
 
 # ------------------------------------------------------------------------------
@@ -437,25 +603,40 @@ while IFS= read -r gitdir; do
   TOTAL_RALPH=$((TOTAL_RALPH + ralph_commits))
 
   name="${repo#$PROJECT_ROOT/}"
-  ACTIVE="$ACTIVE- $name: $commits commits ($ralph_commits from ralph)
+  ACTIVE="$ACTIVE
+📁 $name - $commits commits ($ralph_commits from ralph)
+"
+
+  # What was actually built. Commit subjects carry the PRD task name.
+  subjects=$(git -C "$repo" log --since="$SINCE" --format="   · %s" 2>/dev/null | head -6)
+  [ -n "$subjects" ] && ACTIVE="$ACTIVE$subjects
+"
+  extra=$((commits - 6))
+  [ "$extra" -gt 0 ] && ACTIVE="$ACTIVE   · ... and $extra more
 "
 
   if [ -f "$repo/PRD.md" ]; then
     open_tasks=$(grep -c "^- \[ \]" "$repo/PRD.md" 2>/dev/null || true)
     done_tasks=$(grep -c "^- \[[xX]\]" "$repo/PRD.md" 2>/dev/null || true)
-    ACTIVE="$ACTIVE    PRD: ${done_tasks:-0} done / ${open_tasks:-0} open
+    ACTIVE="$ACTIVE   PRD: ${done_tasks:-0} done / ${open_tasks:-0} open
 "
   fi
 
-  if [ -f "$repo/progress.txt" ] && grep -q "ALL_TASKS_COMPLETE" "$repo/progress.txt" 2>/dev/null; then
-    ACTIVE="$ACTIVE    ✅ all tasks complete
+  # The agent latest note to itself - the closest thing to a status message
+  if [ -f "$repo/progress.txt" ]; then
+    last_note=$(grep -v "ALL_TASKS_COMPLETE" "$repo/progress.txt" 2>/dev/null \
+                | grep -v "^[[:space:]]*$" | tail -n 1 | cut -c1-180)
+    [ -n "$last_note" ] && ACTIVE="$ACTIVE   Last note: $last_note
 "
+    if grep -q "ALL_TASKS_COMPLETE" "$repo/progress.txt" 2>/dev/null; then
+      ACTIVE="$ACTIVE   ✅ backlog finished
+"
+    fi
   fi
 done < <(find "$PROJECT_ROOT" -maxdepth 4 -type d -name .git 2>/dev/null)
 
 if [ -n "$ACTIVE" ]; then
   add "🤖 $TOTAL_COMMITS commits in 24h, $TOTAL_RALPH from autonomous loops"
-  add ""
   REPORT="$REPORT$ACTIVE"
 else
   add "😴 No repository activity in the last 24h."
@@ -515,43 +696,28 @@ WantedBy=timers.target
 EOF
 
 # ------------------------------------------------------------------------------
-# Interactive Telegram credentials
+# Write the Telegram credentials captured in step 0
 # ------------------------------------------------------------------------------
 mkdir -p ~/.config/solyd
 
-echo ""
-echo "📨 [Optional] Telegram Reporting"
-echo "Create a bot with @BotFather, then message it once and get your chat ID"
-echo "from @userinfobot (or https://api.telegram.org/bot<TOKEN>/getUpdates)."
-read -rp "Configure Telegram notifications now? (y/N): " -n 1
-echo ""
-
-if [[ $REPLY =~ ^[Yy]$ ]]; then
-  read -rsp "Bot token (input hidden): " TG_TOKEN
-  echo ""
-  read -rp "Chat ID: " TG_CHAT
-
-  if [ -n "$TG_TOKEN" ] && [ -n "$TG_CHAT" ]; then
-    umask 077
-    cat << EOF > ~/.config/solyd/telegram.env
+if [ -n "$CFG_TG_TOKEN" ] && [ -n "$CFG_TG_CHAT" ]; then
+  umask 077
+  cat << EOF > ~/.config/solyd/telegram.env
 # Telegram credentials for solyd-notify / solyd-daily-report
-TELEGRAM_BOT_TOKEN="$TG_TOKEN"
-TELEGRAM_CHAT_ID="$TG_CHAT"
+TELEGRAM_BOT_TOKEN="$CFG_TG_TOKEN"
+TELEGRAM_CHAT_ID="$CFG_TG_CHAT"
 EOF
-    chmod 600 ~/.config/solyd/telegram.env
+  chmod 600 ~/.config/solyd/telegram.env
 
-    if solyd-notify "Solyd machine setup complete. Reporting is live."; then
-      echo "✅ Telegram connected — check your chat for the test message."
-      TELEGRAM_READY=1
-    else
-      echo "⚠️ Could not reach Telegram. Verify the token/chat ID in"
-      echo "   ~/.config/solyd/telegram.env and retry with: solyd-notify test"
-    fi
+  if solyd-notify "✅ Solyd machine setup complete. Reporting is live."; then
+    echo "✅ Telegram connected — check your chat for the test message."
+    TELEGRAM_READY=1
   else
-    echo "⚠️ Token or chat ID missing. Skipping."
+    echo "⚠️ Could not reach Telegram. Verify the token/chat ID in"
+    echo "   ~/.config/solyd/telegram.env and retry with: solyd-notify test"
   fi
 else
-  echo "⚠️ Skipped. Add credentials later to ~/.config/solyd/telegram.env"
+  echo "⚠️ Telegram not configured. Add credentials to ~/.config/solyd/telegram.env"
 fi
 
 # Activate the timer (needs the user session bus)
@@ -596,31 +762,20 @@ if ! git config --global user.name > /dev/null; then
   git config --global user.email "ai@localhost"
 fi
 
-# ==============================================================================
-# INTERACTIVE ANTHROPIC API KEY SETUP
-# ==============================================================================
-
-echo ""
-echo "🔑 [Optional] Anthropic API Key Configuration"
-echo "Hybrid mode requires an Anthropic API key for the Architect (Sonnet) phase."
-read -p "Do you want to enter your Anthropic API key now? (y/N): " -n 1 -r
-echo ""
-
-if [[ $REPLY =~ ^[Yy]$ ]]; then
-  read -sp "Paste your API key (input will be hidden): " USER_API_KEY
-  echo ""
-
-  if [ -n "$USER_API_KEY" ]; then
-    # Append to ~/.bashrc safely
-    echo "" >> ~/.bashrc
-    echo "# Anthropic API Key for Hybrid Aider / Ralph Loop" >> ~/.bashrc
-    echo "export ANTHROPIC_API_KEY=\"$USER_API_KEY\"" >> ~/.bashrc
-    echo "✅ ANTHROPIC_API_KEY successfully saved to ~/.bashrc!"
+# 5. Persist the Anthropic API key captured in step 0
+if [ -n "$CFG_ANTHROPIC_KEY" ]; then
+  if grep -q "ANTHROPIC_API_KEY" ~/.bashrc 2>/dev/null; then
+    echo "ℹ️ ANTHROPIC_API_KEY already present in ~/.bashrc — leaving it alone."
   else
-    echo "⚠️ Empty key provided. Skipping for now."
+    {
+      echo ""
+      echo "# Anthropic API Key for Hybrid Aider / Ralph Loop"
+      echo "export ANTHROPIC_API_KEY=\"$CFG_ANTHROPIC_KEY\""
+    } >> ~/.bashrc
+    echo "✅ ANTHROPIC_API_KEY saved to ~/.bashrc"
   fi
 else
-  echo "⚠️ Skipped. Remember to export ANTHROPIC_API_KEY before running 'ralph'."
+  echo "⚠️ No Anthropic key set. Export ANTHROPIC_API_KEY before running 'ralph'."
 fi
 
 echo ""
