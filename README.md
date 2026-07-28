@@ -49,6 +49,29 @@ split by artifact type to fight:
 
 `ralph` runs at the project root, next to `PRD.md`.
 
+## Shared engineering conventions
+
+`~/AI-Workspace/ARCHITECTURE.md` holds the standards that apply to **every**
+project — monorepo boundaries, the accessibility contract, TypeScript rules, API
+conventions, and the rule that a failing check is never to be weakened to make
+it pass. It's one file, referenced rather than copied, so editing it changes
+every project's next iteration.
+
+It reaches the agents three ways:
+
+- `ralph` passes it to aider with `--read`, so it's read-only and prompt-cached
+  rather than re-paid for each iteration
+- `solyd-verify` appends it to Claude Code's system prompt, so the reviewer
+  holds code to the same standard
+- Each project's `CLAUDE.md` imports it with `@~/AI-Workspace/ARCHITECTURE.md`
+  for interactive sessions
+
+A project can add `.solyd/ARCHITECTURE.md` to extend it locally; both are loaded,
+project last.
+
+The split is deliberate: **`PRD.md` says what to build, `ARCHITECTURE.md` says
+how.** Keep standards out of PRDs so they don't drift between projects.
+
 ## The autonomous loop
 
 Write a `PRD.md` with a task backlog, then:
@@ -127,6 +150,7 @@ attaches to an already-running session.
 |---|---|
 | `~/.config/solyd/telegram.env` | Bot token and chat ID (mode 600) |
 | `~/.config/solyd/ios-runner.env` | iOS runner mode and host |
+| `~/AI-Workspace/ARCHITECTURE.md` | Shared engineering conventions (all projects) |
 | `~/AI-Workspace/templates/` | PRD template and the monorepo scaffold |
 | `~/.local/state/ralph/` | Per-run logs |
 

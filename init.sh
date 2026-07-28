@@ -271,6 +271,98 @@ echo "📁 [8/12] Creating Project Workspace & Global 'ralph' Harness..."
 mkdir -p ~/Projects
 mkdir -p ~/AI-Workspace/templates
 
+# ------------------------------------------------------------------------------
+# Shared engineering conventions.
+#
+# ONE file, referenced by every project rather than copied into it. ralph loads
+# it into aider as a read-only (and therefore prompt-cached) context file, and
+# solyd-verify appends it to Claude Code's system prompt. Edit it here and every
+# project picks the change up on its next iteration.
+#
+# It holds standards that are true regardless of what is being built. Anything
+# specific to one product belongs in that project's PRD.md.
+# ------------------------------------------------------------------------------
+if [ ! -f ~/AI-Workspace/ARCHITECTURE.md ]; then
+cat << 'EOF' > ~/AI-Workspace/ARCHITECTURE.md
+# Engineering Conventions
+
+These apply to every project on this machine. Project-specific requirements live
+in that project's `PRD.md`; this file is about *how* to build, never *what*.
+
+## Working discipline
+
+- One task per iteration. Finish it completely rather than starting three.
+- **Never weaken a check to make it pass.** Do not delete tests, loosen
+  assertions, remove entries from `.solyd/expected-*.txt`, add `@ts-ignore`, or
+  widen a type to `any` in order to get a green gate. A failing gate is
+  information; suppressing it destroys the only feedback that exists.
+- If a task turns out to be wrong or impossible, write that in `progress.txt`
+  and mark the task blocked. Do not silently substitute a different task.
+- Record what you did in `progress.txt` in plain language — it is the only
+  account of your reasoning anyone reads later.
+
+## Monorepo boundaries
+
+```
+apps/       user-facing clients. Never import from another app.
+services/   backends. Own their data; talk to each other over HTTP, not imports.
+packages/   shared code. May not import from apps/ or services/.
+```
+
+- Code needed by two packages moves to `packages/`, it does not get copied.
+- Dependencies: `pnpm add --filter <package> <dep>`. Never hand-edit a lockfile.
+- Run scripts from the repo root (`pnpm test`, `pnpm typecheck`), not per package.
+
+## TypeScript
+
+- `strict` on. No `any` — use `unknown` and narrow it.
+- Types describe the boundary: exported functions, API payloads, component
+  props. Inference handles the rest; do not annotate every local.
+- Shared request/response types belong in `packages/`, imported by both sides,
+  so client and server cannot drift.
+
+## APIs
+
+- Validate every input at the boundary, before it reaches business logic.
+  Trust nothing from a client, a query string, or an env var.
+- One error shape across all endpoints, with a stable machine-readable code.
+- Return the status code that reflects reality: 400 for bad input, 401 for
+  unauthenticated, 403 for unauthorised, 404 for missing, 5xx only for genuine
+  server faults.
+- Parameterised queries only. Never build SQL by string concatenation.
+
+## UI
+
+- **Every interactive element carries both `testID` and `accessibilityLabel`.**
+  The automated gate drives the app through its accessibility tree; an element
+  without them is invisible to it and counts as not built.
+- When adding an element a user must reach, append its `accessibilityLabel` to
+  `.solyd/expected-web.txt` in the same commit.
+- Handle the three states every async view has: loading, error, empty. A screen
+  that only renders the happy path is unfinished.
+- Labels describe intent ("Sign in"), not appearance ("blue button").
+
+## Secrets and configuration
+
+- No credentials, tokens or keys in source or in commits — read them from the
+  environment and document the variable in the README.
+- Commit a `.env.example` with empty values; never commit `.env`.
+
+## Testing
+
+- Test behaviour at the boundary, not implementation details. A test that breaks
+  when you rename a private function is a liability.
+- Every bug fix starts with a test that reproduces it.
+- Tests must be deterministic: no real network, no wall-clock dependence, no
+  reliance on test execution order.
+
+## Commits
+
+- One logical change per commit, present tense, describing the change and why.
+- Never commit commented-out code or debug logging.
+EOF
+fi
+
 # Starter PRD Template
 cat << 'EOF' > ~/AI-Workspace/templates/PRD.md
 # Project Specification (PRD)
@@ -328,6 +420,14 @@ fi
 touch progress.txt
 
 AIDER_BIN=$(command -v aider || echo "$HOME/.local/bin/aider")
+
+# Shared engineering conventions, identical across every project on this box.
+# Passed with --read so aider treats it as read-only and prompt-caches it,
+# instead of paying for it on every iteration. A project may override or extend
+# it with its own .solyd/ARCHITECTURE.md.
+CONVENTION_FILES=()
+[ -f "$HOME/AI-Workspace/ARCHITECTURE.md" ] && CONVENTION_FILES+=(--read "$HOME/AI-Workspace/ARCHITECTURE.md")
+[ -f ".solyd/ARCHITECTURE.md" ] && CONVENTION_FILES+=(--read ".solyd/ARCHITECTURE.md")
 
 PROJECT_NAME=$(basename "$PWD")
 STARTED_AT=$(date +%s)
@@ -477,7 +577,7 @@ for ((i=1; i<=MAX_LOOPS; i++)); do
 
   PROMPT="Pick the SINGLE highest-priority incomplete task from PRD.md. Implement ONLY that task. Update PRD.md and progress.txt with your changes. If all tasks are finished, append '\''ALL_TASKS_COMPLETE'\'' to progress.txt.
 
-Every interactive element you create MUST carry both a testID and an accessibilityLabel. The automated UI gate addresses elements by those two props and is blind to anything that lacks them.
+Follow ARCHITECTURE.md, which is loaded read-only in this session. It is the standing engineering contract for every project here and overrides your own defaults.
 $LAST_FAILURE
 $VERIFY_NOTES"
 
@@ -485,6 +585,7 @@ $VERIFY_NOTES"
 
   # Execute Aider in Hybrid Architect Mode
   "$AIDER_BIN" PRD.md progress.txt \
+        "${CONVENTION_FILES[@]}" \
         --architect \
         --model "$ARCHITECT_MODEL" \
         --editor-model "$EDITOR_MODEL" \
@@ -1009,9 +1110,9 @@ Review the diff for:
 1. Correctness bugs - logic errors, unhandled cases, broken state
 2. Security - injection, secrets committed to source, unsafe file or network
    handling, missing authorization checks
-3. Interactive components missing testID or accessibilityLabel. The automated
-   UI gate addresses elements by those two props and cannot see anything that
-   lacks them.
+3. Violations of the engineering conventions in your system prompt, especially
+   checks that were weakened to force a green gate - deleted tests, loosened
+   assertions, removed expected-label entries, added ts-ignore, widened types
 
 Report ONLY specific, real problems you can point at. No style opinions, no
 praise, no summary of what the code does. One finding per line, formatted:
@@ -1022,11 +1123,23 @@ If there is nothing worth reporting, output exactly: CLEAN
 Diff:
 $DIFF"
 
-OUTPUT=$(claude -p "$PROMPT" \
-           --model "$VERIFY_MODEL" \
-           --permission-mode plan \
-           --allowedTools "Read,Grep,Glob" \
-           --max-budget-usd "$VERIFY_BUDGET" 2>/dev/null)
+# The same shared conventions ralph gives aider, so the reviewer holds the code
+# to one standard rather than inventing its own
+SYSTEM_EXTRA=""
+for c in "$HOME/AI-Workspace/ARCHITECTURE.md" ".solyd/ARCHITECTURE.md"; do
+  [ -f "$c" ] && SYSTEM_EXTRA="$SYSTEM_EXTRA
+$(cat "$c")"
+done
+
+CLAUDE_ARGS=(-p "$PROMPT"
+             --model "$VERIFY_MODEL"
+             --permission-mode plan
+             --allowedTools "Read,Grep,Glob"
+             --max-budget-usd "$VERIFY_BUDGET")
+[ -n "$SYSTEM_EXTRA" ] && CLAUDE_ARGS+=(--append-system-prompt "These are the engineering conventions this repository is held to:
+$SYSTEM_EXTRA")
+
+OUTPUT=$(claude "${CLAUDE_ARGS[@]}" 2>/dev/null)
 
 # Mark this point reviewed regardless of outcome, so the next pass does not
 # re-review the same commits
@@ -1077,6 +1190,27 @@ cat << 'EOF' > "$SCAFFOLD/package.json"
     "typecheck": "tsc --noEmit"
   }
 }
+EOF
+
+# Claude Code reads this automatically; the @import pulls in the shared
+# conventions so interactive sessions are held to the same contract as ralph.
+cat << 'EOF' > "$SCAFFOLD/CLAUDE.md"
+# CLAUDE.md
+
+@~/AI-Workspace/ARCHITECTURE.md
+
+The engineering conventions imported above are shared by every project on this
+machine and are the standing contract. Edit them at the source, not here.
+
+## This project
+
+- `PRD.md` is the task backlog. `progress.txt` is the running log.
+- Layout: `apps/` clients, `services/` backends, `packages/` shared code.
+- `ralph` runs the autonomous loop from this directory.
+- The gate lives in `.solyd/flows/`. `.solyd/expected-web.txt` lists the
+  accessibility labels the running app must expose.
+
+Add project-specific context below this line, not in the shared conventions.
 EOF
 
 cat << 'EOF' > "$SCAFFOLD/.gitignore"
@@ -1319,40 +1453,18 @@ cat << 'EOF' > "$SCAFFOLD/PRD.md"
 ## Objective
 - Define the main goal of this project.
 
-## Repository layout
+## Scope
 
-This is a single pnpm workspace holding every part of the product. Put new code
-in the right place rather than creating top-level directories:
+- Who is this for and what problem does it solve?
+- What is explicitly out of scope?
 
-```
-apps/       user-facing clients      (apps/mobile is the Expo app, apps/web ...)
-services/   backends and APIs        (services/api is started by the UI gate)
-packages/   code shared between them (types, client SDK, config)
-```
+## How to build it
 
-Add dependencies with `pnpm add --filter <package> <dep>`, never by editing a
-lockfile. Run everything from the root: `pnpm test`, `pnpm typecheck`.
+Engineering standards — monorepo boundaries, the accessibility contract,
+TypeScript rules, API conventions — live in `~/AI-Workspace/ARCHITECTURE.md` and
+are loaded into every session automatically. They are not repeated here.
 
-## UI Contract (non-negotiable)
-
-The automated gate drives this app through its **accessibility tree**, not
-screenshots. It can only see elements that expose themselves properly.
-
-- Every interactive element MUST have both `testID` and `accessibilityLabel`.
-- Anything without them is invisible to the gate and counts as not built.
-- When you add an element a user must reach, append its `accessibilityLabel`
-  to `.solyd/expected-web.txt` in the same commit.
-- Never delete entries from that file to make the gate pass.
-
-```tsx
-<Pressable
-  testID="login-submit"
-  accessibilityLabel="Sign in"
-  onPress={handleSubmit}
->
-  <Text>Sign in</Text>
-</Pressable>
-```
+**This file describes what to build. That one describes how.**
 
 ## Task Backlog
 - [ ] Task 1: Scaffold navigation and the first screen in apps/mobile.

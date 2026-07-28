@@ -131,6 +131,30 @@ Consequences to keep in mind when editing:
 - The daily report prunes `node_modules` when scanning for `.git`, so a vendored
   repo never appears as a phantom project.
 
+## Shared conventions vs. per-project specs
+
+Two files, and the boundary between them matters:
+
+- `~/AI-Workspace/ARCHITECTURE.md` — **how** to build. Standards true of every
+  project: monorepo boundaries, the accessibility contract, TypeScript, APIs,
+  secrets, and "never weaken a check to make it pass". Created once by step 8,
+  guarded by `[ ! -f ]` so user edits survive re-running `init.sh`.
+- `PRD.md` — **what** to build. Per project, nothing else.
+
+Standards must not leak back into the PRD template; that's what caused the
+duplication this replaced. The conventions reach the agents three ways:
+
+| Consumer | Mechanism |
+|---|---|
+| aider (via `ralph`) | `--read` — read-only and prompt-cached, not re-paid per iteration |
+| Claude Code (via `solyd-verify`) | `--append-system-prompt` |
+| Interactive Claude Code | `@~/AI-Workspace/ARCHITECTURE.md` in the project `CLAUDE.md` |
+
+Both `ralph` and `solyd-verify` also pick up an optional project-level
+`.solyd/ARCHITECTURE.md`, loaded after the global one. In `ralph` these are
+assembled into the `CONVENTION_FILES` array — it must stay safe to expand when
+empty (`"${CONVENTION_FILES[@]}"` on an empty array must vanish, not become `""`).
+
 ## The UI feedback contract
 
 The gate drives apps through the **accessibility tree**, never screenshots. An
