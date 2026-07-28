@@ -6,7 +6,7 @@
 # - NVIDIA Drivers & CUDA Toolkit
 # - KVM (Hardware Acceleration) + OpenSSH & GNOME Remote Desktop (RDP from macOS)
 # - Docker Engine (Non-root user configuration)
-# - Node.js LTS, pnpm, yarn, Expo CLI, JDK 17, Android Studio
+# - Node.js LTS, pnpm, yarn, Expo CLI, JDK 17, Android Studio + headless SDK/AVD
 # - Python 3, Pip, Pipx, Aider
 # - Ollama + qwen2.5-coder:7b Model
 # - Directory Hierarchy (~/Projects, ~/AI-Workspace)
@@ -155,6 +155,96 @@ sudo npm install -g npm@latest pnpm yarn expo-cli
 
 # Install Android Studio cleanly via Snap
 sudo snap install android-studio --classic
+
+# ------------------------------------------------------------------------------
+# Headless Android SDK provisioning
+#
+# The snap ships only the IDE. Without this, the first launch drops you into the
+# setup wizard to download the SDK by hand. Provisioning it with sdkmanager here
+# means Android Studio finds a complete SDK on first run and skips the wizard,
+# and adb/gradle/expo work from the shell immediately.
+# ------------------------------------------------------------------------------
+echo "🤖 [5/11] Provisioning the Android SDK (headless, no wizard)..."
+
+export ANDROID_HOME="$HOME/Android/Sdk"
+export ANDROID_SDK_ROOT="$ANDROID_HOME"
+
+provision_android_sdk() {
+  mkdir -p "$ANDROID_HOME/cmdline-tools"
+
+  if [ ! -x "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ]; then
+    # Resolve the current build number from the download page so this does not
+    # rot; fall back to a known-good build if the page layout changes.
+    local url tmp
+    url=$(curl -fsSL --max-time 30 https://developer.android.com/studio 2>/dev/null \
+          | grep -oE "https://dl\.google\.com/android/repository/commandlinetools-linux-[0-9]+_latest\.zip" \
+          | head -1)
+    url="${url:-https://dl.google.com/android/repository/commandlinetools-linux-15859902_latest.zip}"
+    echo "   Fetching command-line tools: $url"
+
+    tmp=$(mktemp -d)
+    curl -fL --retry 3 --progress-bar -o "$tmp/tools.zip" "$url" || { rm -rf "$tmp"; return 1; }
+    unzip -q -o "$tmp/tools.zip" -d "$tmp" || { rm -rf "$tmp"; return 1; }
+    rm -rf "$ANDROID_HOME/cmdline-tools/latest"
+    mv "$tmp/cmdline-tools" "$ANDROID_HOME/cmdline-tools/latest" || { rm -rf "$tmp"; return 1; }
+    rm -rf "$tmp"
+  fi
+
+  export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH"
+  command -v sdkmanager > /dev/null || return 1
+
+  # sdkmanager warns on every invocation without this file
+  mkdir -p "$HOME/.android"
+  touch "$HOME/.android/repositories.cfg"
+
+  # Nothing installs until the licenses are accepted
+  yes | sdkmanager --licenses > /dev/null 2>&1 || true
+
+  # Resolve the newest STABLE versions instead of pinning ones that will rot.
+  # Preview platforms use letter code names (android-Baklava) and are filtered
+  # out by matching digits only.
+  local list api build_tools sys_image
+  list=$(sdkmanager --list 2>/dev/null)
+  api=$(echo "$list" | grep -oE "platforms;android-[0-9]+" | sort -t- -k2 -n -u | tail -1)
+  build_tools=$(echo "$list" | grep -oE "build-tools;[0-9.]+" | sort -V -u | tail -1)
+
+  if [ -z "$api" ]; then
+    echo "   ⚠️ Could not read the SDK package list."
+    return 1
+  fi
+  API_LEVEL="${api##*android-}"
+  echo "   Latest stable platform: android-$API_LEVEL"
+
+  # Emulator image: plain google_apis is preferred, playstore is the fallback
+  sys_image=$(echo "$list" | grep -oE "system-images;android-$API_LEVEL;google_apis;x86_64" | head -1)
+  [ -z "$sys_image" ] && sys_image=$(echo "$list" \
+    | grep -oE "system-images;android-$API_LEVEL;google_apis_playstore;x86_64" | head -1)
+
+  sdkmanager --install \
+    "platform-tools" \
+    "platforms;android-$API_LEVEL" \
+    "${build_tools:-build-tools;35.0.0}" \
+    "emulator" \
+    ${sys_image:+"$sys_image"} > /dev/null || return 1
+
+  # A ready-to-boot emulator, so `expo run:android` has a target on day one
+  if [ -n "$sys_image" ] && ! avdmanager list avd 2>/dev/null | grep -q "Name: solyd_pixel"; then
+    local device_flag=""
+    avdmanager list device 2>/dev/null | grep -q "pixel_7" && device_flag="pixel_7"
+    echo "no" | avdmanager create avd -n solyd_pixel -k "$sys_image" \
+      ${device_flag:+-d "$device_flag"} --force > /dev/null 2>&1 \
+      && echo "   Created AVD 'solyd_pixel' ($sys_image)"
+  fi
+
+  return 0
+}
+
+if provision_android_sdk; then
+  echo "✅ Android SDK ready at $ANDROID_HOME (API $API_LEVEL) — no wizard needed."
+else
+  echo "⚠️ Android SDK provisioning failed. Android Studio will still work, but"
+  echo "   its first-run wizard will ask you to download the SDK manually."
+fi
 
 # 6. Python Tooling & Aider
 echo "🐍 [6/11] Installing UV, and Aider..."
@@ -747,13 +837,17 @@ sudo systemctl daemon-reload
 sudo systemctl restart ollama
 
 # 3. Inject Android SDK Paths into Bash
+if ! grep -q "ANDROID_HOME" ~/.bashrc 2>/dev/null; then
 cat << 'EOF' >> ~/.bashrc
 
 # Android Studio & Expo Dev Paths
 export ANDROID_HOME=$HOME/Android/Sdk
+export ANDROID_SDK_ROOT=$ANDROID_HOME
 export PATH=$PATH:$ANDROID_HOME/emulator
 export PATH=$PATH:$ANDROID_HOME/platform-tools
+export PATH=$PATH:$ANDROID_HOME/cmdline-tools/latest/bin
 EOF
+fi
 
 # 4. Initialize Git Identity for Aider Auto-Commits
 # (Checks if unset, and assigns a default bot identity if missing)
@@ -815,4 +909,10 @@ else
   echo "   ~/.config/solyd/telegram.env (chmod 600), then test with:"
   echo "   solyd-notify \"hello\" && systemctl --user enable --now solyd-daily-report.timer"
 fi
+echo ""
+echo "5. Android is preconfigured — no setup wizard:"
+echo "   - SDK at $ANDROID_HOME (API ${API_LEVEL:-?}, platform-tools, build-tools)"
+echo "   - Emulator AVD 'solyd_pixel' — start it with: emulator -avd solyd_pixel"
+echo "   - Android Studio will detect this SDK on first launch"
+echo "   - Reboot first: the emulator needs your new 'kvm' group membership"
 echo "=========================================================================="
