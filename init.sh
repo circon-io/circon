@@ -4,7 +4,7 @@
 # ==============================================================================
 # Installs:
 # - NVIDIA Drivers & CUDA Toolkit
-# - KVM (Hardware Acceleration) + OpenSSH & xrdp (Remote Access from macOS)
+# - KVM (Hardware Acceleration) + OpenSSH & GNOME Remote Desktop (RDP from macOS)
 # - Docker Engine (Non-root user configuration)
 # - Node.js LTS, pnpm, yarn, Expo CLI, JDK 17, Android Studio
 # - Python 3, Pip, Pipx, Aider
@@ -18,31 +18,29 @@ set -e
 echo "🚀 Starting Full AI & Software Development Environment Setup..."
 
 # 1. System Updates & Essential Utilities
-echo "📦 [1/9] Updating System & Installing Essential Tools..."
+echo "📦 [1/10] Updating System & Installing Essential Tools..."
 sudo apt update && sudo apt upgrade -y
 sudo apt install -y \
   curl wget git build-essential unzip jq tmux screen htop \
-  software-properties-common ca-certificates gnupg \
-  openssh-server xrdp openjdk-17-jdk
+  software-properties-common ca-certificates gnupg openssl \
+  openssh-server gnome-remote-desktop openjdk-17-jdk
 
-# Enable SSH and RDP for remote management from macOS
+# Enable SSH for remote management from macOS (RDP is configured in step 9)
 sudo systemctl enable --now ssh
-sudo systemctl enable --now xrdp
-sudo usermod -aG ssl-cert $USER
 
 # 2. NVIDIA Drivers & CUDA Setup
-echo "🟢 [2/9] Auto-detecting & Installing NVIDIA Drivers & CUDA..."
+echo "🟢 [2/10] Auto-detecting & Installing NVIDIA Drivers & CUDA..."
 sudo ubuntu-drivers install
 sudo apt install -y nvidia-cuda-toolkit
 
 # 3. KVM / Virtualization (For Android Emulator Acceleration)
-echo "⚡ [3/9] Setting up KVM for Android Emulation..."
+echo "⚡ [3/10] Setting up KVM for Android Emulation..."
 sudo apt install -y qemu-system libvirt-daemon-system libvirt-clients bridge-utils virt-manager
 sudo usermod -aG kvm $USER
 sudo usermod -aG libvirt $USER
 
 # 4. Docker Engine Setup
-echo "🐳 [4/9] Installing Docker Engine..."
+echo "🐳 [4/10] Installing Docker Engine..."
 if ! command -v docker &> /dev/null; then
   curl -fsSL https://get.docker.com -o get-docker.sh
   sudo sh get-docker.sh
@@ -51,7 +49,7 @@ fi
 sudo usermod -aG docker $USER
 
 # 5. Node.js (LTS), Package Managers & Android Studio
-echo "🟢 [5/9] Installing Node.js LTS, pnpm, Expo CLI, and Android Studio..."
+echo "🟢 [5/10] Installing Node.js LTS, pnpm, Expo CLI, and Android Studio..."
 curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -
 sudo apt install -y nodejs
 sudo npm install -g npm@latest pnpm yarn expo-cli
@@ -60,20 +58,20 @@ sudo npm install -g npm@latest pnpm yarn expo-cli
 sudo snap install android-studio --classic
 
 # 6. Python Tooling & Aider
-echo "🐍 [6/9] Installing UV, and Aider..."
+echo "🐍 [6/10] Installing UV, and Aider..."
 curl -LsSf https://astral.sh/uv/install.sh | sh
 uv tool install --python 3.12 aider-chat
 uv tool update-shell
 
 # 7. Ollama & Qwen Coder Model Setup
-echo "🦙 [7/9] Installing Ollama & Pulling qwen2.5-coder:7b..."
+echo "🦙 [7/10] Installing Ollama & Pulling qwen2.5-coder:7b..."
 curl -fsSL https://ollama.com/install.sh | sh
 sudo systemctl enable --now ollama
 sleep 5
 ollama pull qwen2.5-coder:7b
 
 # 8. Directory Structure & Global 'ralph' Harness
-echo "📁 [8/9] Creating Project Workspace & Global 'ralph' Harness..."
+echo "📁 [8/10] Creating Project Workspace & Global 'ralph' Harness..."
 
 # Sensible Directory Structure
 mkdir -p ~/Projects/apps                   # React Native, iOS/Android, Web Apps
@@ -202,11 +200,138 @@ EOF'
 
 sudo chmod +x /usr/local/bin/ralph
 
+# 9. Native Remote Desktop (GNOME Remote Desktop / grdctl)
+echo "🖥️  [9/10] Configuring Ubuntu's Native Remote Desktop (RDP)..."
+
+# Ubuntu's built-in RDP server and xrdp both bind port 3389 — make sure only the
+# native GNOME implementation is active if xrdp was installed previously.
+if systemctl list-unit-files 2>/dev/null | grep -q '^xrdp'; then
+  echo "⚠️ Disabling legacy xrdp in favour of GNOME Remote Desktop..."
+  sudo systemctl disable --now xrdp xrdp-sesman 2>/dev/null || true
+fi
+
+# Collect connection credentials (defaults to the current user)
+read -rp "RDP username [$USER]: " RDP_USER
+RDP_USER=${RDP_USER:-$USER}
+read -rsp "RDP password (leave empty to auto-generate): " RDP_PASS
+echo ""
+if [ -z "$RDP_PASS" ]; then
+  RDP_PASS=$(openssl rand -base64 15)
+  RDP_PASS_GENERATED=1
+fi
+
+RDP_SUMMARY=""
+
+# ------------------------------------------------------------------------------
+# 9a. PRIMARY: system-level "Remote Login" (GNOME 46+ / Ubuntu 24.04+)
+#
+# This is the daemon that answers on port 3389 straight after a cold boot, with
+# nobody signed in. Connecting drops you at GDM, where you log in with your
+# normal Linux account — so no Automatic Login is required and the machine stays
+# locked when it is unattended.
+# ------------------------------------------------------------------------------
+if grdctl --help 2>&1 | grep -q -- '--system'; then
+  echo "🔐 Setting up system-level Remote Login (works at the login screen)..."
+
+  SYS_CERT_DIR="/var/lib/gnome-remote-desktop"
+  sudo mkdir -p "$SYS_CERT_DIR"
+  if [ ! -f "$SYS_CERT_DIR/rdp-tls.key" ]; then
+    sudo openssl req -new -newkey rsa:4096 -days 3650 -nodes -x509 \
+      -subj "/C=DE/O=solyd-machine/CN=$(hostname)" \
+      -out "$SYS_CERT_DIR/rdp-tls.crt" \
+      -keyout "$SYS_CERT_DIR/rdp-tls.key" 2>/dev/null
+  fi
+  # The daemon runs as the 'gnome-remote-desktop' user and silently refuses
+  # connections if it cannot read its own key — this is the #1 failure cause.
+  sudo chown gnome-remote-desktop:gnome-remote-desktop \
+    "$SYS_CERT_DIR/rdp-tls.crt" "$SYS_CERT_DIR/rdp-tls.key" || true
+  sudo chmod 644 "$SYS_CERT_DIR/rdp-tls.crt"
+  sudo chmod 600 "$SYS_CERT_DIR/rdp-tls.key"
+
+  sudo grdctl --system rdp set-tls-cert "$SYS_CERT_DIR/rdp-tls.crt"
+  sudo grdctl --system rdp set-tls-key "$SYS_CERT_DIR/rdp-tls.key"
+  sudo grdctl --system rdp set-credentials "$RDP_USER" "$RDP_PASS"
+  sudo grdctl --system rdp enable
+  sudo systemctl enable --now gnome-remote-desktop.service || true
+
+  RDP_SYSTEM_ENABLED=1
+  RDP_SUMMARY="   Port 3389 -> login screen (gateway user '$RDP_USER', then your Linux account)"
+  echo "✅ Remote Login enabled — reachable on port 3389 after a reboot."
+else
+  echo "⚠️ This Ubuntu release predates GNOME 46, so system-level Remote Login is"
+  echo "   unavailable. RDP will only answer while you are logged in locally;"
+  echo "   enable Automatic Login in Settings > System > Users to work around it."
+fi
+
+# ------------------------------------------------------------------------------
+# 9b. SECONDARY: per-user screen sharing — attaches to the session that is
+# already running, so a remote login and a local login see the same desktop.
+# Moved to 3390 where supported so it cannot fight the system daemon for 3389.
+# ------------------------------------------------------------------------------
+USER_CERT_DIR="$HOME/.local/share/gnome-remote-desktop/certificates"
+mkdir -p "$USER_CERT_DIR"
+if [ ! -f "$USER_CERT_DIR/rdp-tls.key" ]; then
+  openssl req -new -newkey rsa:4096 -days 3650 -nodes -x509 \
+    -subj "/C=DE/O=solyd-machine/CN=$(hostname)" \
+    -out "$USER_CERT_DIR/rdp-tls.crt" \
+    -keyout "$USER_CERT_DIR/rdp-tls.key" 2>/dev/null
+  chmod 600 "$USER_CERT_DIR/rdp-tls.key"
+fi
+
+# grdctl and gsettings both need the user session bus (absent over plain SSH)
+export DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=/run/user/$(id -u)/bus}"
+
+if [ -S "/run/user/$(id -u)/bus" ]; then
+  grdctl rdp set-tls-cert "$USER_CERT_DIR/rdp-tls.crt"
+  grdctl rdp set-tls-key "$USER_CERT_DIR/rdp-tls.key"
+  grdctl rdp set-credentials "$RDP_USER" "$RDP_PASS"
+  grdctl rdp disable-view-only   # allow full keyboard/mouse control
+
+  USER_RDP_PORT=3389
+  if [ -n "$RDP_SYSTEM_ENABLED" ]; then
+    if grdctl rdp --help 2>&1 | grep -q 'set-port'; then
+      grdctl rdp set-port 3390
+      USER_RDP_PORT=3390
+    else
+      echo "⚠️ grdctl cannot move the user service off 3389 on this release —"
+      echo "   leaving it disabled so it does not clash with Remote Login."
+      USER_RDP_PORT=""
+    fi
+  fi
+
+  if [ -n "$USER_RDP_PORT" ]; then
+    grdctl rdp enable
+    gsettings set org.gnome.desktop.remote-desktop.rdp enable true
+    gsettings set org.gnome.desktop.remote-desktop.rdp view-only false
+    # Spawn a virtual display so the desktop is usable with no monitor attached
+    gsettings set org.gnome.desktop.remote-desktop.rdp screen-share-mode extend 2>/dev/null || true
+    systemctl --user enable --now gnome-remote-desktop.service
+    systemctl --user restart gnome-remote-desktop.service
+    RDP_SUMMARY="$RDP_SUMMARY
+   Port $USER_RDP_PORT -> your live desktop session (user '$RDP_USER')"
+    echo "✅ Screen sharing enabled for '$RDP_USER' on port $USER_RDP_PORT."
+  else
+    grdctl rdp disable
+  fi
+else
+  echo "⚠️ No graphical session bus found — screen sharing for the live session was"
+  echo "   skipped. Re-run this step from the Ubuntu desktop to enable it."
+fi
+
+# Keep the user's services alive after logout so they stay reachable headless
+sudo loginctl enable-linger "$USER" || true
+
+# Open the RDP ports if the firewall is active
+if command -v ufw &> /dev/null && sudo ufw status | grep -q "Status: active"; then
+  sudo ufw allow 3389/tcp
+  sudo ufw allow 3390/tcp
+fi
+
 # ==============================================================================
 # MISSING FIXES PATCH
 # ==============================================================================
 
-echo "🔧 [9/9] Applying Pro-Mode System Patches..."
+echo "🔧 [10/10] Applying Pro-Mode System Patches..."
 
 # 1. Fix React Native / Expo File Watcher Limit (ENOSPC fix)
 echo "fs.inotify.max_user_watches=524288" | sudo tee -a /etc/sysctl.conf
@@ -271,7 +396,14 @@ echo "   sudo reboot"
 echo ""
 echo "2. Connect remotely from macOS:"
 echo "   - Terminal (SSH): ssh $USER@<ubuntu-ip>"
-echo "   - Remote Desktop (GUI): Use 'Microsoft Remote Desktop' from Mac App Store to connect to <ubuntu-ip>"
+echo "   - Remote Desktop (GUI): Use 'Windows App' / 'Microsoft Remote Desktop'"
+echo "     from the Mac App Store and connect to <ubuntu-ip>"
+echo "$RDP_SUMMARY"
+echo "     RDP user: $RDP_USER"
+if [ -n "$RDP_PASS_GENERATED" ]; then
+  echo "     RDP password (auto-generated, save it now): $RDP_PASS"
+fi
+echo "     The certificate is self-signed — accept the warning on first connect."
 echo ""
 echo "3. How to run an automated AI loop in ANY folder:"
 echo "   cd ~/Projects/apps/my-app"
