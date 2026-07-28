@@ -11,6 +11,8 @@
 # - Ollama + qwen2.5-coder:7b Model
 # - Directory Hierarchy (~/Projects, ~/AI-Workspace)
 # - Global 'ralph' Autonomous Harness Command in /usr/local/bin/
+# - agent-device UI feedback loop (accessibility trees, not screenshots)
+# - Telegram reporting + Claude Code review pass
 # ==============================================================================
 
 set -e
@@ -117,7 +119,7 @@ echo "   Configuration is done — the rest runs unattended."
 echo "=========================================================================="
 
 # 1. System Updates & Essential Utilities
-echo "📦 [1/11] Updating System & Installing Essential Tools..."
+echo "📦 [1/12] Updating System & Installing Essential Tools..."
 sudo apt update && sudo apt upgrade -y
 sudo apt install -y \
   curl wget git build-essential unzip jq tmux screen htop \
@@ -128,18 +130,18 @@ sudo apt install -y \
 sudo systemctl enable --now ssh
 
 # 2. NVIDIA Drivers & CUDA Setup
-echo "🟢 [2/11] Auto-detecting & Installing NVIDIA Drivers & CUDA..."
+echo "🟢 [2/12] Auto-detecting & Installing NVIDIA Drivers & CUDA..."
 sudo ubuntu-drivers install
 sudo apt install -y nvidia-cuda-toolkit
 
 # 3. KVM / Virtualization (For Android Emulator Acceleration)
-echo "⚡ [3/11] Setting up KVM for Android Emulation..."
+echo "⚡ [3/12] Setting up KVM for Android Emulation..."
 sudo apt install -y qemu-system libvirt-daemon-system libvirt-clients bridge-utils virt-manager
 sudo usermod -aG kvm $USER
 sudo usermod -aG libvirt $USER
 
 # 4. Docker Engine Setup
-echo "🐳 [4/11] Installing Docker Engine..."
+echo "🐳 [4/12] Installing Docker Engine..."
 if ! command -v docker &> /dev/null; then
   curl -fsSL https://get.docker.com -o get-docker.sh
   sudo sh get-docker.sh
@@ -148,7 +150,7 @@ fi
 sudo usermod -aG docker $USER
 
 # 5. Node.js (LTS), Package Managers & Android Studio
-echo "🟢 [5/11] Installing Node.js LTS, pnpm, Expo CLI, and Android Studio..."
+echo "🟢 [5/12] Installing Node.js LTS, pnpm, Expo CLI, and Android Studio..."
 curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -
 sudo apt install -y nodejs
 sudo npm install -g npm@latest pnpm yarn expo-cli
@@ -164,7 +166,7 @@ sudo snap install android-studio --classic
 # means Android Studio finds a complete SDK on first run and skips the wizard,
 # and adb/gradle/expo work from the shell immediately.
 # ------------------------------------------------------------------------------
-echo "🤖 [5/11] Provisioning the Android SDK (headless, no wizard)..."
+echo "🤖 [5/12] Provisioning the Android SDK (headless, no wizard)..."
 
 export ANDROID_HOME="$HOME/Android/Sdk"
 export ANDROID_SDK_ROOT="$ANDROID_HOME"
@@ -247,20 +249,20 @@ else
 fi
 
 # 6. Python Tooling & Aider
-echo "🐍 [6/11] Installing UV, and Aider..."
+echo "🐍 [6/12] Installing UV, and Aider..."
 curl -LsSf https://astral.sh/uv/install.sh | sh
 uv tool install --python 3.12 aider-chat
 uv tool update-shell
 
 # 7. Ollama & Qwen Coder Model Setup
-echo "🦙 [7/11] Installing Ollama & Pulling qwen2.5-coder:7b..."
+echo "🦙 [7/12] Installing Ollama & Pulling qwen2.5-coder:7b..."
 curl -fsSL https://ollama.com/install.sh | sh
 sudo systemctl enable --now ollama
 sleep 5
 ollama pull qwen2.5-coder:7b
 
 # 8. Directory Structure & Global 'ralph' Harness
-echo "📁 [8/11] Creating Project Workspace & Global 'ralph' Harness..."
+echo "📁 [8/12] Creating Project Workspace & Global 'ralph' Harness..."
 
 # Sensible Directory Structure
 mkdir -p ~/Projects/apps                   # React Native, iOS/Android, Web Apps
@@ -363,6 +365,90 @@ work_done() {
   fi
 }
 
+VERIFY_EVERY=${VERIFY_EVERY:-5}
+VERIFY_NOTES=""
+LAST_FAILURE=""
+
+# Second opinion from Claude Code on the accumulated diff. Advisory only: it
+# feeds the next prompt and Telegram, and never fails the loop.
+verify_pass() {
+  command -v solyd-verify > /dev/null 2>&1 || return 0
+  echo "🔍 Verification pass: $1"
+
+  local out
+  out=$(solyd-verify "$1" 2>> "$RUN_LOG")
+
+  if [ -n "$out" ]; then
+    VERIFY_NOTES="A reviewer looked at your recent commits and found:
+$out
+Address these before starting new work."
+    echo "$out"
+    echo "$out" >> "$RUN_LOG"
+    notify "🔍 ralph REVIEW: $PROJECT_NAME
+$1
+
+$out"
+  else
+    VERIFY_NOTES=""
+    echo "   Reviewer found nothing to report."
+  fi
+  return 0
+}
+
+# Loop 3 target, if one has been configured
+IOS_RUNNER_MODE=none
+[ -f "$HOME/.config/solyd/ios-runner.env" ] && . "$HOME/.config/solyd/ios-runner.env"
+
+# Tiered quality gate: cheapest signal first, stop at the first failure.
+# Every tier is opt-in by file presence, so a project with none of them behaves
+# exactly as before. GATE_TIER names the tier that failed, for the alert.
+run_gate() {
+  GATE_TIER=""
+  : > "$TEST_LOG"
+
+  # Tier 1 - typecheck (seconds)
+  if [ -f "tsconfig.json" ] && [ -x "node_modules/.bin/tsc" ]; then
+    GATE_TIER="typecheck"
+    echo "   -> tsc --noEmit"
+    node_modules/.bin/tsc --noEmit >> "$TEST_LOG" 2>&1 || return 1
+  fi
+
+  # Tier 2 - unit tests
+  if [ -f "package.json" ] && \
+     node -e "var p=require(\"./package.json\");process.exit(p.scripts&&p.scripts.test?0:1)" 2>/dev/null; then
+    GATE_TIER="unit tests"
+    echo "   -> npm test"
+    npm test >> "$TEST_LOG" 2>&1 || return 1
+  fi
+
+  # Tiers 3-5 - UI surfaces. Each is a project-provided flow script that starts
+  # the app and asserts against the accessibility tree via agent-device. The
+  # expo-app scaffold ships these; other projects simply have none.
+  if command -v agent-device > /dev/null 2>&1; then
+
+    if [ -x ".solyd/flows/web.sh" ]; then
+      GATE_TIER="web UI"
+      echo "   -> web UI flow"
+      ./.solyd/flows/web.sh >> "$TEST_LOG" 2>&1 || return 1
+    fi
+
+    if [ -x ".solyd/flows/android.sh" ] && adb devices 2>/dev/null | grep -q "device$"; then
+      GATE_TIER="android UI"
+      echo "   -> android UI flow"
+      ./.solyd/flows/android.sh >> "$TEST_LOG" 2>&1 || return 1
+    fi
+
+    if [ -x ".solyd/flows/ios.sh" ] && [ "$IOS_RUNNER_MODE" != "none" ]; then
+      GATE_TIER="ios UI"
+      echo "   -> ios UI flow ($IOS_RUNNER_MODE)"
+      ./.solyd/flows/ios.sh >> "$TEST_LOG" 2>&1 || return 1
+    fi
+  fi
+
+  GATE_TIER=""
+  return 0
+}
+
 # Whatever the agent appended to progress.txt during this run: its own account
 # of what it did, in its own words.
 new_notes() {
@@ -385,7 +471,11 @@ for ((i=1; i<=MAX_LOOPS; i++)); do
   echo "🔁 Loop Iteration #$i of $MAX_LOOPS"
   echo "=================================================="
 
-  PROMPT="Pick the SINGLE highest-priority incomplete task from PRD.md. Implement ONLY that task. Update PRD.md and progress.txt with your changes. If all tasks are finished, append '\''ALL_TASKS_COMPLETE'\'' to progress.txt."
+  PROMPT="Pick the SINGLE highest-priority incomplete task from PRD.md. Implement ONLY that task. Update PRD.md and progress.txt with your changes. If all tasks are finished, append '\''ALL_TASKS_COMPLETE'\'' to progress.txt.
+
+Every interactive element you create MUST carry both a testID and an accessibilityLabel. The automated UI gate addresses elements by those two props and is blind to anything that lacks them.
+$LAST_FAILURE
+$VERIFY_NOTES"
 
   echo "--- iteration $i ---" >> "$RUN_LOG"
 
@@ -400,20 +490,14 @@ for ((i=1; i<=MAX_LOOPS; i++)); do
 
   echo "🧪 Running Backpressure Quality Gate..."
 
-  TEST_CMD="npm test"
-  if [ ! -f "package.json" ]; then
-    TEST_CMD="true" # Pass automatically if no package.json exists yet
-  fi
-
-  # Run to a file so the exit code survives and the output can be quoted in
-  # the failure alert
-  eval "$TEST_CMD" > "$TEST_LOG" 2>&1
+  run_gate
   TEST_STATUS=$?
   cat "$TEST_LOG"
   cat "$TEST_LOG" >> "$RUN_LOG"
 
   if [ $TEST_STATUS -eq 0 ]; then
-    echo "✅ Tests passed!"
+    echo "✅ Gate passed!"
+    LAST_FAILURE=""
     git add .
 
     if ! git diff --cached --quiet; then
@@ -432,17 +516,26 @@ for ((i=1; i<=MAX_LOOPS; i++)); do
       echo "⚠️ Aider made no file changes this iteration."
     fi
   else
-    echo "❌ Tests failed! Reverting bad iteration code..."
+    echo "❌ Gate failed at the ${GATE_TIER:-unknown} tier! Reverting bad iteration code..."
     git reset --hard HEAD
     git clean -fd
+
+    # Tell the next iteration exactly which surface broke and how, so the agent
+    # is not guessing at what the UI actually did
+    LAST_FAILURE="The previous attempt failed the ${GATE_TIER:-quality} gate:
+$(tail -n 25 "$TEST_LOG" 2>/dev/null)"
 
     ((STUCK_COUNT++))
     echo "⚠️ Failure count: $STUCK_COUNT/$STUCK_LIMIT"
 
+    # A failing gate is the moment a second opinion is worth paying for
+    verify_pass "gate failure at the ${GATE_TIER:-quality} tier (iteration $i)"
+
     if [ $STUCK_COUNT -ge $STUCK_LIMIT ]; then
       echo "🛑 CIRCUIT BREAKER TRIGGERED: Agent failed $STUCK_LIMIT consecutive times. Halting."
       notify "🛑 ralph HALTED: $PROJECT_NAME
-Circuit breaker tripped after $STUCK_LIMIT consecutive test failures.
+Circuit breaker tripped after $STUCK_LIMIT consecutive failures.
+Failing tier: ${GATE_TIER:-unknown}
 Stopped at iteration $i of $MAX_LOOPS after $(elapsed).
 
 Completed before the failure ($COMMITS_MADE commits):
@@ -451,12 +544,17 @@ $(work_done)
 Last agent notes:
 $(new_notes)
 
-Why it failed (tail of $TEST_CMD):
+Why it failed (${GATE_TIER:-gate}):
 $(tail -n 12 "$TEST_LOG" 2>/dev/null)
 
 Full log: $RUN_LOG"
       exit 1
     fi
+  fi
+
+  # Scheduled second opinion on healthy runs
+  if [ $((i % VERIFY_EVERY)) -eq 0 ] && [ $TEST_STATUS -eq 0 ]; then
+    verify_pass "scheduled review at iteration $i"
   fi
 
   if grep -q "ALL_TASKS_COMPLETE" progress.txt 2>/dev/null; then
@@ -500,7 +598,7 @@ EOF'
 sudo chmod +x /usr/local/bin/ralph
 
 # 9. Native Remote Desktop (GNOME Remote Desktop / grdctl)
-echo "🖥️  [9/11] Configuring Ubuntu's Native Remote Desktop (RDP)..."
+echo "🖥️  [9/12] Configuring Ubuntu's Native Remote Desktop (RDP)..."
 
 # Ubuntu's built-in RDP server and xrdp both bind port 3389 — make sure only the
 # native GNOME implementation is active if xrdp was installed previously.
@@ -621,7 +719,7 @@ if command -v ufw &> /dev/null && sudo ufw status | grep -q "Status: active"; th
 fi
 
 # 10. Telegram Reporting (task notifications + daily digest)
-echo "📨 [10/11] Installing Telegram Notifier & Daily Report..."
+echo "📨 [10/12] Installing Telegram Notifier & Daily Report..."
 
 # ------------------------------------------------------------------------------
 # solyd-notify: sends a plain-text Telegram message. Takes the text as arguments
@@ -820,11 +918,412 @@ else
   echo "   systemctl --user enable --now solyd-daily-report.timer"
 fi
 
+# 11. Agent UI Feedback Tooling (Expo / React Native)
+echo "👁️  [11/12] Installing Agent UI Feedback Tooling (agent-device)..."
+
+# ------------------------------------------------------------------------------
+# Gives the ralph loop eyes and hands on a running app. agent-device reads the
+# accessibility tree as structured data — not screenshots — and drives taps and
+# typing, with the same vocabulary across web, Android and iOS.
+#
+# Loops 1 (Expo web) and 2 (Android emulator) run entirely on this machine.
+# Loop 3 (iOS) needs Apple hardware and stays stubbed until a runner exists.
+# ------------------------------------------------------------------------------
+
+provision_agent_tooling() {
+  # agent-device needs Node 22.12+ generally, 24+ for its web automation.
+  # setup_lts.x should already satisfy this — assert rather than assume.
+  local major minor
+  major=$(node -p "process.versions.node.split('.')[0]" 2>/dev/null || echo 0)
+  minor=$(node -p "process.versions.node.split('.')[1]" 2>/dev/null || echo 0)
+
+  if [ "$major" -lt 24 ]; then
+    if [ "$major" -lt 22 ] || { [ "$major" -eq 22 ] && [ "$minor" -lt 12 ]; }; then
+      echo "   Node $major.$minor is below the 22.12 minimum — upgrading to 24.x"
+    else
+      echo "   Node $major.$minor works, but web automation needs 24+ — upgrading"
+    fi
+    curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash - || return 1
+    sudo apt install -y nodejs || return 1
+    echo "   Node is now $(node --version)"
+  else
+    echo "   Node $(node --version) satisfies agent-device requirements."
+  fi
+
+  # Chromium runtime libraries for the web surface. Playwright ships the most
+  # reliable dependency list for headless Chromium on Ubuntu, so borrow it.
+  sudo npx --yes playwright install-deps chromium > /dev/null 2>&1 \
+    || echo "   ⚠️ Chromium system deps incomplete — web surface may need attention."
+
+  sudo npm install -g agent-device @anthropic-ai/claude-code eas-cli || return 1
+  return 0
+}
+
+# ------------------------------------------------------------------------------
+# solyd-verify: the second-opinion pass. aider (Claude architect + local qwen)
+# writes the code; Claude Code reviews the accumulated diff for correctness and
+# security every few iterations. Prints findings, or nothing when clean.
+# Advisory by design — it never fails the loop.
+# ------------------------------------------------------------------------------
+sudo bash -c 'cat << "EOF" > /usr/local/bin/solyd-verify
+#!/bin/bash
+REASON="${1:-scheduled review}"
+VERIFY_MODEL="${VERIFY_MODEL:-sonnet}"
+VERIFY_BUDGET="${VERIFY_BUDGET:-0.50}"
+LAST_REF_FILE=".solyd/.last-verified"
+
+command -v claude > /dev/null 2>&1 || exit 0
+[ -d ".git" ] || exit 0
+[ -n "$ANTHROPIC_API_KEY" ] || exit 0
+
+mkdir -p .solyd
+
+# Review only what changed since the previous pass; fall back to the whole
+# history the first time.
+LAST_REF=$(cat "$LAST_REF_FILE" 2>/dev/null)
+if [ -z "$LAST_REF" ] || ! git cat-file -e "$LAST_REF" 2>/dev/null; then
+  LAST_REF=$(git log --format=%H 2>/dev/null | tail -1)
+fi
+[ -n "$LAST_REF" ] || exit 0
+
+DIFF=$(git diff "$LAST_REF"..HEAD 2>/dev/null)
+[ -n "$DIFF" ] || exit 0
+
+# Keep an unattended review affordable
+DIFF_LINES=$(echo "$DIFF" | wc -l | tr -d "[:space:]")
+if [ "${DIFF_LINES:-0}" -gt 3000 ]; then
+  DIFF="$(echo "$DIFF" | head -n 3000)
+... diff truncated at 3000 lines of $DIFF_LINES"
+fi
+
+PROMPT="You are reviewing commits written autonomously by an AI coding loop.
+Trigger: $REASON
+
+Review the diff for:
+1. Correctness bugs - logic errors, unhandled cases, broken state
+2. Security - injection, secrets committed to source, unsafe file or network
+   handling, missing authorization checks
+3. Interactive components missing testID or accessibilityLabel. The automated
+   UI gate addresses elements by those two props and cannot see anything that
+   lacks them.
+
+Report ONLY specific, real problems you can point at. No style opinions, no
+praise, no summary of what the code does. One finding per line, formatted:
+- <file>: <the problem> -> <the fix>
+
+If there is nothing worth reporting, output exactly: CLEAN
+
+Diff:
+$DIFF"
+
+OUTPUT=$(claude -p "$PROMPT" \
+           --model "$VERIFY_MODEL" \
+           --permission-mode plan \
+           --allowedTools "Read,Grep,Glob" \
+           --max-budget-usd "$VERIFY_BUDGET" 2>/dev/null)
+
+# Mark this point reviewed regardless of outcome, so the next pass does not
+# re-review the same commits
+git rev-parse HEAD > "$LAST_REF_FILE" 2>/dev/null
+
+if [ -z "$OUTPUT" ]; then
+  echo "solyd-verify: no response from claude" >&2
+  exit 0
+fi
+
+# Clean reviews stay silent so the loop only speaks up when it matters
+echo "$OUTPUT" | grep -qx "CLEAN" && exit 0
+echo "$OUTPUT"
+EOF'
+sudo chmod +x /usr/local/bin/solyd-verify
+
+if provision_agent_tooling; then
+  echo "✅ agent-device, Claude Code and EAS CLI installed."
+else
+  echo "⚠️ Agent UI tooling install failed — ralph falls back to the plain"
+  echo "   'npm test' gate, exactly as before. Retry with:"
+  echo "   sudo npm install -g agent-device @anthropic-ai/claude-code eas-cli"
+fi
+
+# ------------------------------------------------------------------------------
+# Expo project scaffold: the flow scripts the ralph gate looks for, plus a PRD
+# that teaches the agent the accessibility contract from its first commit.
+# ------------------------------------------------------------------------------
+SCAFFOLD=~/AI-Workspace/templates/expo-app
+mkdir -p "$SCAFFOLD/.solyd/flows"
+
+# --- Loop 1: web UI gate ------------------------------------------------------
+cat << 'EOF' > "$SCAFFOLD/.solyd/flows/web.sh"
+#!/bin/bash
+# Loop 1 - web UI gate.
+#
+# Boots the Expo web build, reads the accessibility tree via agent-device, and
+# fails if any label listed in .solyd/expected-web.txt is missing from it.
+#
+# This is what enforces the testID/accessibilityLabel contract: an element
+# without them never appears in the tree, so the gate catches it at runtime -
+# a stronger check than any lint rule, because it proves the label actually
+# reaches the accessibility layer.
+
+PORT="${EXPO_WEB_PORT:-8081}"
+EXPECTED=".solyd/expected-web.txt"
+EXPO_LOG=".solyd/expo-web.log"
+
+if [ ! -f "$EXPECTED" ]; then
+  echo "No $EXPECTED - nothing to assert yet, skipping web gate."
+  exit 0
+fi
+
+EXPO_PID=""
+cleanup() {
+  agent-device close > /dev/null 2>&1
+  [ -n "$EXPO_PID" ] && kill "$EXPO_PID" 2> /dev/null
+  # Expo spawns children; take the process group with it
+  [ -n "$EXPO_PID" ] && pkill -P "$EXPO_PID" 2> /dev/null
+  return 0
+}
+trap cleanup EXIT
+
+echo "Starting Expo web on port $PORT..."
+npx expo start --web --port "$PORT" > "$EXPO_LOG" 2>&1 &
+EXPO_PID=$!
+# Drop it from the jobs table so shutting it down does not print "Terminated"
+# into the gate output the agent has to read
+disown "$EXPO_PID" 2> /dev/null || true
+
+# Wait for the dev server, but not forever
+READY=""
+for _ in $(seq 1 60); do
+  if curl -sf "http://localhost:$PORT" > /dev/null 2>&1; then READY=1; break; fi
+  if ! kill -0 "$EXPO_PID" 2> /dev/null; then
+    echo "Expo web server died on startup. Last 30 lines:"
+    tail -n 30 "$EXPO_LOG"
+    exit 1
+  fi
+  sleep 2
+done
+
+if [ -z "$READY" ]; then
+  echo "Expo web server never became reachable on port $PORT. Last 30 lines:"
+  tail -n 30 "$EXPO_LOG"
+  exit 1
+fi
+
+if ! agent-device open "http://localhost:$PORT" --platform web; then
+  echo "agent-device could not open the web target."
+  exit 1
+fi
+
+SNAPSHOT=$(agent-device snapshot -i 2>&1)
+if [ -z "$SNAPSHOT" ]; then
+  echo "Empty accessibility snapshot - the app rendered nothing addressable."
+  exit 1
+fi
+
+echo "--- accessibility tree ---"
+echo "$SNAPSHOT"
+echo "--------------------------"
+
+STATUS=0
+while IFS= read -r label; do
+  case "$label" in ""|\#*) continue ;; esac
+  if echo "$SNAPSHOT" | grep -qF "$label"; then
+    echo "ok      $label"
+  else
+    echo "MISSING $label   <- not in the accessibility tree"
+    STATUS=1
+  fi
+done < "$EXPECTED"
+
+# Surface runtime errors the tree cannot show
+if grep -qiE "error|unhandled" "$EXPO_LOG"; then
+  echo "--- errors in the Expo log ---"
+  grep -iE "error|unhandled" "$EXPO_LOG" | head -n 15
+  echo "------------------------------"
+fi
+
+exit $STATUS
+EOF
+
+# --- Loop 2: android UI gate --------------------------------------------------
+cat << 'EOF' > "$SCAFFOLD/.solyd/flows/android.sh"
+#!/bin/bash
+# Loop 2 - Android native UI gate.
+#
+# Same contract as web.sh, against the real React Native runtime on the
+# emulator. Inert until you record the installed app id, because installing a
+# dev build is far slower than the web loop and is not worth doing every
+# iteration:
+#
+#   echo com.yourorg.yourapp > .solyd/android-app-id
+
+APP_ID_FILE=".solyd/android-app-id"
+EXPECTED=".solyd/expected-android.txt"
+
+if [ ! -f "$APP_ID_FILE" ] || [ ! -f "$EXPECTED" ]; then
+  echo "Android gate not configured (need $APP_ID_FILE and $EXPECTED), skipping."
+  exit 0
+fi
+
+APP_ID=$(tr -d "[:space:]" < "$APP_ID_FILE")
+[ -n "$APP_ID" ] || { echo "Empty $APP_ID_FILE, skipping."; exit 0; }
+
+cleanup() { agent-device close > /dev/null 2>&1; return 0; }
+trap cleanup EXIT
+
+if ! agent-device open "$APP_ID" --platform android; then
+  echo "agent-device could not open $APP_ID on the emulator."
+  echo "Is the dev build installed?  adb shell pm list packages | grep ${APP_ID%%.*}"
+  exit 1
+fi
+
+SNAPSHOT=$(agent-device snapshot -i 2>&1)
+if [ -z "$SNAPSHOT" ]; then
+  echo "Empty accessibility snapshot from the emulator."
+  exit 1
+fi
+
+echo "--- accessibility tree (android) ---"
+echo "$SNAPSHOT"
+echo "------------------------------------"
+
+STATUS=0
+while IFS= read -r label; do
+  case "$label" in ""|\#*) continue ;; esac
+  if echo "$SNAPSHOT" | grep -qF "$label"; then
+    echo "ok      $label"
+  else
+    echo "MISSING $label   <- not in the accessibility tree"
+    STATUS=1
+  fi
+done < "$EXPECTED"
+
+exit $STATUS
+EOF
+
+chmod +x "$SCAFFOLD/.solyd/flows/web.sh" "$SCAFFOLD/.solyd/flows/android.sh"
+
+cat << 'EOF' > "$SCAFFOLD/.solyd/expected-web.txt"
+# Accessibility labels that must be present in the running app.
+# One per line; lines starting with # are ignored.
+#
+# The agent maintains this file: every time it builds a screen, it adds the
+# accessibilityLabel of each element a user must be able to reach. The web gate
+# fails if any of them is missing from the accessibility tree, which catches
+# both "the screen did not render" and "the element has no label".
+EOF
+
+cat << 'EOF' > "$SCAFFOLD/PRD.md"
+# Project Specification (PRD)
+
+## Objective
+- Define the main goal of this app.
+
+## UI Contract (non-negotiable)
+
+The automated gate drives this app through its **accessibility tree**, not
+screenshots. It can only see elements that expose themselves properly.
+
+- Every interactive element MUST have both `testID` and `accessibilityLabel`.
+- Anything without them is invisible to the gate and counts as not built.
+- When you add an element a user must reach, append its `accessibilityLabel`
+  to `.solyd/expected-web.txt` in the same commit.
+- Never delete entries from that file to make the gate pass.
+
+```tsx
+<Pressable
+  testID="login-submit"
+  accessibilityLabel="Sign in"
+  onPress={handleSubmit}
+>
+  <Text>Sign in</Text>
+</Pressable>
+```
+
+## Task Backlog
+- [ ] Task 1: Scaffold navigation and the first screen.
+- [ ] Task 2: Add accessibility labels and populate .solyd/expected-web.txt.
+- [ ] Task 3: Implement core functionality.
+EOF
+
+# --- One-shot project creator -------------------------------------------------
+sudo bash -c 'cat << "EOF" > /usr/local/bin/solyd-new-expo-app
+#!/bin/bash
+# Create an Expo app pre-wired for the ralph UI feedback loop.
+#   solyd-new-expo-app my-app
+set -e
+
+NAME="$1"
+if [ -z "$NAME" ]; then
+  echo "Usage: solyd-new-expo-app <app-name>"
+  exit 1
+fi
+
+TARGET="$HOME/Projects/apps/$NAME"
+if [ -e "$TARGET" ]; then
+  echo "❌ $TARGET already exists."
+  exit 1
+fi
+
+echo "📱 Creating Expo app at $TARGET..."
+mkdir -p "$HOME/Projects/apps"
+cd "$HOME/Projects/apps"
+npx --yes create-expo-app@latest "$NAME"
+
+cd "$TARGET"
+cp -rn "$HOME/AI-Workspace/templates/expo-app/." . 2>/dev/null || true
+chmod +x .solyd/flows/*.sh 2>/dev/null || true
+touch progress.txt
+
+# react-native-web is what makes the fast web feedback loop possible
+npx --yes expo install react-dom react-native-web @expo/metro-runtime
+
+[ -d .git ] || git init -q .
+git add -A
+git -c user.name="AI Developer" -c user.email="ai@localhost" \
+    commit -qm "chore: scaffold expo app with ralph UI feedback loop" || true
+
+echo ""
+echo "✅ Ready. Next:"
+echo "   cd $TARGET"
+echo "   ralph"
+EOF'
+sudo chmod +x /usr/local/bin/solyd-new-expo-app
+
+# ------------------------------------------------------------------------------
+# iOS runner configuration (Loop 3). Defaults to 'none' — web and Android
+# feedback work with no Apple hardware at all. Flip the mode when a runner
+# exists; nothing else in the pipeline needs to change.
+# ------------------------------------------------------------------------------
+mkdir -p ~/.config/solyd
+if [ ! -f ~/.config/solyd/ios-runner.env ]; then
+  cat << 'EOF' > ~/.config/solyd/ios-runner.env
+# iOS feedback runner for the ralph gate (Loop 3).
+#
+#   none    no iOS surface; web + Android only            <- default
+#   mac     Apple Silicon Mac over SSH (baguette + agent-device)
+#   device  physical iPhone on USB via go-ios + WebDriverAgent
+#   vm      local Docker-OSX — BUILDS ONLY, never the UI loop
+#
+# Why iOS is not local: the iOS Simulator is macOS-only, headless mode still
+# renders (it just hides the window), and a QEMU macOS VM has no Metal. See
+# the plan for the full reasoning.
+
+IOS_RUNNER_MODE=none
+
+# Used when IOS_RUNNER_MODE=mac
+IOS_RUNNER_HOST=""
+IOS_RUNNER_USER=""
+IOS_RUNNER_KEY="$HOME/.ssh/id_ed25519"
+EOF
+  echo "📱 iOS runner stubbed at ~/.config/solyd/ios-runner.env (mode: none)."
+fi
+
 # ==============================================================================
 # MISSING FIXES PATCH
 # ==============================================================================
 
-echo "🔧 [11/11] Applying Pro-Mode System Patches..."
+echo "🔧 [12/12] Applying Pro-Mode System Patches..."
 
 # 1. Fix React Native / Expo File Watcher Limit (ENOSPC fix)
 echo "fs.inotify.max_user_watches=524288" | sudo tee -a /etc/sysctl.conf
@@ -915,4 +1414,15 @@ echo "   - SDK at $ANDROID_HOME (API ${API_LEVEL:-?}, platform-tools, build-tool
 echo "   - Emulator AVD 'solyd_pixel' — start it with: emulator -avd solyd_pixel"
 echo "   - Android Studio will detect this SDK on first launch"
 echo "   - Reboot first: the emulator needs your new 'kvm' group membership"
+echo ""
+echo "6. Expo apps with an agent UI feedback loop:"
+echo "   solyd-new-expo-app my-app     # scaffolds + wires the gate"
+echo "   cd ~/Projects/apps/my-app && ralph"
+echo "   - The gate reads the ACCESSIBILITY TREE, not screenshots, so every"
+echo "     interactive element needs testID + accessibilityLabel to be seen"
+echo "   - List required labels in .solyd/expected-web.txt; the gate fails"
+echo "     the iteration if any of them is missing from the running app"
+echo "   - Claude Code reviews the diff every 5 iterations and on failure"
+echo "   - iOS is stubbed at ~/.config/solyd/ios-runner.env (mode: none);"
+echo "     iOS simulators need Apple hardware, see the plan for why"
 echo "=========================================================================="
