@@ -31,12 +31,30 @@ memberships.
 Android is fully provisioned headlessly — no setup wizard, no manual SDK
 downloads. An AVD named `solyd_pixel` is ready to boot after reboot.
 
+## Project layout
+
+`~/Projects` holds one directory per project — nothing else. Each project is a
+pnpm monorepo containing its own clients and services, so there's no top-level
+split by artifact type to fight:
+
+```
+~/Projects/my-thing/
+  PRD.md              # the backlog ralph works through
+  progress.txt        # the agent's running notes
+  .solyd/             # gate flows and expected accessibility labels
+  apps/mobile/        # Expo client
+  services/api/       # backend, started automatically by the UI gate
+  packages/shared/    # types and code shared between them
+```
+
+`ralph` runs at the project root, next to `PRD.md`.
+
 ## The autonomous loop
 
 Write a `PRD.md` with a task backlog, then:
 
 ```bash
-cd ~/Projects/apps/my-app
+cd ~/Projects/my-thing
 git init
 ralph                 # or: ralph 50   to raise the iteration cap
 ```
@@ -49,13 +67,17 @@ failures trip a circuit breaker rather than burning the budget.
 `ralph` messages you on Telegram when it finishes, stalls, or trips — including
 what it built, the agent's own progress notes, and the failing output.
 
-## Expo apps with UI feedback
+## Full-stack projects with UI feedback
 
 ```bash
-solyd-new-expo-app my-app
-cd ~/Projects/apps/my-app
+solyd-new-project my-thing        # monorepo + Expo client + gate wired up
+cd ~/Projects/my-thing
 ralph
 ```
+
+Use `--bare` to get the monorepo without a client. The gate starts
+`services/api` before the client, so the accessibility tree reflects a working
+app rather than an error state.
 
 The gate drives the running app through its **accessibility tree**, not
 screenshots, so the agent can actually check what it rendered and act on it.
@@ -83,7 +105,7 @@ workarounds don't work.
 | Command | Description |
 |---|---|
 | `ralph [max_loops]` | Run the autonomous loop in the current git repo |
-| `solyd-new-expo-app <name>` | Scaffold an Expo app wired to the UI gate |
+| `solyd-new-project <name> [--bare]` | Scaffold a pnpm monorepo wired to the UI gate |
 | `solyd-daily-report [--stdout]` | Send or preview the daily digest |
 | `solyd-notify "message"` | Send a Telegram message |
 | `solyd-verify [reason]` | Run a Claude Code review of the recent diff |
@@ -105,7 +127,7 @@ attaches to an already-running session.
 |---|---|
 | `~/.config/solyd/telegram.env` | Bot token and chat ID (mode 600) |
 | `~/.config/solyd/ios-runner.env` | iOS runner mode and host |
-| `~/AI-Workspace/templates/` | PRD template and the Expo scaffold |
+| `~/AI-Workspace/templates/` | PRD template and the monorepo scaffold |
 | `~/.local/state/ralph/` | Per-run logs |
 
 Change the digest time with `systemctl --user edit solyd-daily-report.timer`.

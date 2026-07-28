@@ -78,7 +78,7 @@ Step 5 intentionally prints `[5/12]` twice (Android Studio, then headless SDK).
 | `solyd-notify` | Sends a Telegram message. Silent no-op when unconfigured. |
 | `solyd-daily-report` | 20:00 digest via a `systemd --user` timer. `--stdout` to preview. |
 | `solyd-verify` | Claude Code review pass over the diff since the last pass. |
-| `solyd-new-expo-app` | Scaffolds an Expo app wired to the UI feedback gate. |
+| `solyd-new-project` | Scaffolds a pnpm monorepo (apps/services/packages) wired to the gate. |
 
 ### The ralph loop
 
@@ -102,13 +102,34 @@ Design decisions worth preserving:
 Cheapest signal first, stop at the first failure, `$GATE_TIER` names it:
 
 1. `tsc --noEmit` — if `tsconfig.json` **and** `node_modules/.bin/tsc` exist
-2. `npm test` — if `package.json` declares a `test` script
+2. `pnpm test` (or `npm test`) — if `package.json` declares a `test` script.
+   pnpm is used when `pnpm-workspace.yaml` or `pnpm-lock.yaml` is present.
 3. `.solyd/flows/web.sh` — Expo web accessibility assertions
 4. `.solyd/flows/android.sh` — same on the emulator, if a device is attached
 5. `.solyd/flows/ios.sh` — if `IOS_RUNNER_MODE != none`
 
 Every tier is opt-in by file presence, so a project with none of them behaves
 exactly as before this existed. Preserve that property.
+
+## Project layout on the target machine
+
+`~/Projects` holds **one directory per project and nothing else**. Each project
+is a pnpm workspace with `apps/` (clients), `services/` (backends) and
+`packages/` (shared code) inside it.
+
+This replaced an earlier top-level split by artifact type
+(`apps/`, `servers/`, …), which was wrong: every project here spans both, so a
+single repo would have had to live in two trees. Don't reintroduce it. `ralph`
+runs at the project root next to `PRD.md`, which is exactly the monorepo root.
+
+Consequences to keep in mind when editing:
+
+- Flow scripts run from the **monorepo root**, not the client directory. They
+  `cd` into `apps/mobile` (override via `.solyd/client-dir`).
+- `web.sh` starts `services/api` before the client, otherwise the client renders
+  its error state and the accessibility tree misrepresents what was built.
+- The daily report prunes `node_modules` when scanning for `.git`, so a vendored
+  repo never appears as a phantom project.
 
 ## The UI feedback contract
 

@@ -264,11 +264,11 @@ ollama pull qwen2.5-coder:7b
 # 8. Directory Structure & Global 'ralph' Harness
 echo "📁 [8/12] Creating Project Workspace & Global 'ralph' Harness..."
 
-# Sensible Directory Structure
-mkdir -p ~/Projects/apps                   # React Native, iOS/Android, Web Apps
-mkdir -p ~/Projects/servers                # Node.js, Python, Databases, Backend APIs
-mkdir -p ~/Projects/business-and-marketing # Copywriting, Business Models, Strategy
-mkdir -p ~/Projects/research-and-docs      # Tech Research, System Architecture Specs
+# One directory per project, nothing else. Each project is a pnpm monorepo
+# holding its own clients and services, so categorising by artifact type up here
+# would only split a single repo across two trees. ralph runs at the project
+# root, next to PRD.md.
+mkdir -p ~/Projects
 mkdir -p ~/AI-Workspace/templates
 
 # Starter PRD Template
@@ -413,17 +413,21 @@ run_gate() {
     node_modules/.bin/tsc --noEmit >> "$TEST_LOG" 2>&1 || return 1
   fi
 
-  # Tier 2 - unit tests
+  # Tier 2 - unit tests. In a pnpm workspace this recurses into every package.
   if [ -f "package.json" ] && \
      node -e "var p=require(\"./package.json\");process.exit(p.scripts&&p.scripts.test?0:1)" 2>/dev/null; then
     GATE_TIER="unit tests"
-    echo "   -> npm test"
-    npm test >> "$TEST_LOG" 2>&1 || return 1
+    local pm="npm"
+    if [ -f "pnpm-workspace.yaml" ] || [ -f "pnpm-lock.yaml" ]; then
+      command -v pnpm > /dev/null 2>&1 && pm="pnpm"
+    fi
+    echo "   -> $pm test"
+    "$pm" test >> "$TEST_LOG" 2>&1 || return 1
   fi
 
   # Tiers 3-5 - UI surfaces. Each is a project-provided flow script that starts
   # the app and asserts against the accessibility tree via agent-device. The
-  # expo-app scaffold ships these; other projects simply have none.
+  # monorepo scaffold ships these; other projects simply have none.
   if command -v agent-device > /dev/null 2>&1; then
 
     if [ -x ".solyd/flows/web.sh" ]; then
@@ -821,7 +825,9 @@ while IFS= read -r gitdir; do
 "
     fi
   fi
-done < <(find "$PROJECT_ROOT" -maxdepth 4 -type d -name .git 2>/dev/null)
+  # One monorepo per project, so .git sits at ~/Projects/<name>/.git. Prune
+  # node_modules so a vendored .git never shows up as a phantom project.
+done < <(find "$PROJECT_ROOT" -maxdepth 4 -name node_modules -prune -o -type d -name .git -print 2>/dev/null)
 
 if [ -n "$ACTIVE" ]; then
   add "🤖 $TOTAL_COMMITS commits in 24h, $TOTAL_RALPH from autonomous loops"
@@ -1049,8 +1055,48 @@ fi
 # Expo project scaffold: the flow scripts the ralph gate looks for, plus a PRD
 # that teaches the agent the accessibility contract from its first commit.
 # ------------------------------------------------------------------------------
-SCAFFOLD=~/AI-Workspace/templates/expo-app
+SCAFFOLD=~/AI-Workspace/templates/monorepo
 mkdir -p "$SCAFFOLD/.solyd/flows"
+mkdir -p "$SCAFFOLD/apps" "$SCAFFOLD/services" "$SCAFFOLD/packages"
+
+cat << 'EOF' > "$SCAFFOLD/pnpm-workspace.yaml"
+packages:
+  - "apps/*"
+  - "services/*"
+  - "packages/*"
+EOF
+
+cat << 'EOF' > "$SCAFFOLD/package.json"
+{
+  "name": "monorepo",
+  "private": true,
+  "scripts": {
+    "dev": "pnpm --parallel --recursive dev",
+    "build": "pnpm --recursive build",
+    "test": "pnpm --recursive --if-present test",
+    "typecheck": "tsc --noEmit"
+  }
+}
+EOF
+
+cat << 'EOF' > "$SCAFFOLD/.gitignore"
+node_modules/
+.expo/
+dist/
+build/
+*.log
+.solyd/*.log
+.solyd/.last-verified
+.env
+.env.local
+EOF
+
+# Keep the empty workspace dirs in git so the agent sees where things go
+for d in apps services packages; do
+  cat << EOF > "$SCAFFOLD/$d/.gitkeep"
+# $d/ — see PRD.md for what belongs here
+EOF
+done
 
 # --- Loop 1: web UI gate ------------------------------------------------------
 cat << 'EOF' > "$SCAFFOLD/.solyd/flows/web.sh"
@@ -1065,31 +1111,79 @@ cat << 'EOF' > "$SCAFFOLD/.solyd/flows/web.sh"
 # a stronger check than any lint rule, because it proves the label actually
 # reaches the accessibility layer.
 
+# Run from the monorepo root. The client lives in a workspace package; override
+# with .solyd/client-dir if yours is not at apps/mobile.
+CLIENT_DIR="apps/mobile"
+[ -f ".solyd/client-dir" ] && CLIENT_DIR=$(tr -d "[:space:]" < .solyd/client-dir)
+
 PORT="${EXPO_WEB_PORT:-8081}"
+API_PORT="${API_PORT:-3000}"
 EXPECTED=".solyd/expected-web.txt"
 EXPO_LOG=".solyd/expo-web.log"
+API_LOG=".solyd/api.log"
 
 if [ ! -f "$EXPECTED" ]; then
   echo "No $EXPECTED - nothing to assert yet, skipping web gate."
   exit 0
 fi
 
+if [ ! -d "$CLIENT_DIR" ]; then
+  echo "No client at $CLIENT_DIR - skipping web gate."
+  echo "Set a different path in .solyd/client-dir if the client lives elsewhere."
+  exit 0
+fi
+
 EXPO_PID=""
+API_PID=""
+# Reap with wait, otherwise bash prints "Terminated" notices into the gate
+# output the agent has to read
+stop() {
+  [ -n "$1" ] || return 0
+  pkill -P "$1" 2> /dev/null
+  kill "$1" 2> /dev/null
+  wait "$1" 2> /dev/null
+  return 0
+}
 cleanup() {
   agent-device close > /dev/null 2>&1
-  [ -n "$EXPO_PID" ] && kill "$EXPO_PID" 2> /dev/null
-  # Expo spawns children; take the process group with it
-  [ -n "$EXPO_PID" ] && pkill -P "$EXPO_PID" 2> /dev/null
+  stop "$EXPO_PID"
+  stop "$API_PID"
   return 0
 }
 trap cleanup EXIT
 
-echo "Starting Expo web on port $PORT..."
-npx expo start --web --port "$PORT" > "$EXPO_LOG" 2>&1 &
+# Start the backend first if there is one, otherwise the client renders its
+# error state and the accessibility tree is a lie about what was built.
+API_DIR=""
+for candidate in services/api services/server; do
+  if [ -f "$candidate/package.json" ] && \
+     node -e "var p=require(\"./$candidate/package.json\");process.exit(p.scripts&&p.scripts.dev?0:1)" 2>/dev/null; then
+    API_DIR="$candidate"
+    break
+  fi
+done
+
+if [ -n "$API_DIR" ]; then
+  echo "Starting API from $API_DIR on port $API_PORT..."
+  ( cd "$API_DIR" && PORT="$API_PORT" pnpm dev ) > "$API_LOG" 2>&1 &
+  API_PID=$!
+
+  for _ in $(seq 1 30); do
+    curl -sf -o /dev/null "http://localhost:$API_PORT" 2>/dev/null && break
+    kill -0 "$API_PID" 2> /dev/null || break
+    sleep 1
+  done
+
+  if ! kill -0 "$API_PID" 2> /dev/null; then
+    echo "API died on startup. Last 30 lines:"
+    tail -n 30 "$API_LOG"
+    exit 1
+  fi
+fi
+
+echo "Starting Expo web from $CLIENT_DIR on port $PORT..."
+( cd "$CLIENT_DIR" && npx expo start --web --port "$PORT" ) > "$EXPO_LOG" 2>&1 &
 EXPO_PID=$!
-# Drop it from the jobs table so shutting it down does not print "Terminated"
-# into the gate output the agent has to read
-disown "$EXPO_PID" 2> /dev/null || true
 
 # Wait for the dev server, but not forever
 READY=""
@@ -1140,6 +1234,12 @@ if grep -qiE "error|unhandled" "$EXPO_LOG"; then
   echo "--- errors in the Expo log ---"
   grep -iE "error|unhandled" "$EXPO_LOG" | head -n 15
   echo "------------------------------"
+fi
+
+if [ -n "$API_DIR" ] && grep -qiE "error|unhandled" "$API_LOG"; then
+  echo "--- errors in the API log ---"
+  grep -iE "error|unhandled" "$API_LOG" | head -n 15
+  echo "-----------------------------"
 fi
 
 exit $STATUS
@@ -1217,7 +1317,21 @@ cat << 'EOF' > "$SCAFFOLD/PRD.md"
 # Project Specification (PRD)
 
 ## Objective
-- Define the main goal of this app.
+- Define the main goal of this project.
+
+## Repository layout
+
+This is a single pnpm workspace holding every part of the product. Put new code
+in the right place rather than creating top-level directories:
+
+```
+apps/       user-facing clients      (apps/mobile is the Expo app, apps/web ...)
+services/   backends and APIs        (services/api is started by the UI gate)
+packages/   code shared between them (types, client SDK, config)
+```
+
+Add dependencies with `pnpm add --filter <package> <dep>`, never by editing a
+lockfile. Run everything from the root: `pnpm test`, `pnpm typecheck`.
 
 ## UI Contract (non-negotiable)
 
@@ -1241,54 +1355,75 @@ screenshots. It can only see elements that expose themselves properly.
 ```
 
 ## Task Backlog
-- [ ] Task 1: Scaffold navigation and the first screen.
+- [ ] Task 1: Scaffold navigation and the first screen in apps/mobile.
 - [ ] Task 2: Add accessibility labels and populate .solyd/expected-web.txt.
-- [ ] Task 3: Implement core functionality.
+- [ ] Task 3: Stand up services/api with the first endpoint.
+- [ ] Task 4: Share request/response types via packages/shared.
 EOF
 
 # --- One-shot project creator -------------------------------------------------
-sudo bash -c 'cat << "EOF" > /usr/local/bin/solyd-new-expo-app
+sudo bash -c 'cat << "EOF" > /usr/local/bin/solyd-new-project
 #!/bin/bash
-# Create an Expo app pre-wired for the ralph UI feedback loop.
-#   solyd-new-expo-app my-app
+# Create a pnpm monorepo pre-wired for the ralph UI feedback loop.
+#
+#   solyd-new-project my-thing            # monorepo with an Expo client
+#   solyd-new-project my-thing --bare     # monorepo only, no client yet
 set -e
 
-NAME="$1"
+NAME=""
+BARE=""
+for arg in "$@"; do
+  case "$arg" in
+    --bare) BARE=1 ;;
+    -*)     echo "Unknown option: $arg"; exit 1 ;;
+    *)      [ -z "$NAME" ] && NAME="$arg" ;;
+  esac
+done
+
 if [ -z "$NAME" ]; then
-  echo "Usage: solyd-new-expo-app <app-name>"
+  echo "Usage: solyd-new-project <project-name> [--bare]"
   exit 1
 fi
 
-TARGET="$HOME/Projects/apps/$NAME"
+TARGET="$HOME/Projects/$NAME"
 if [ -e "$TARGET" ]; then
   echo "❌ $TARGET already exists."
   exit 1
 fi
 
-echo "📱 Creating Expo app at $TARGET..."
-mkdir -p "$HOME/Projects/apps"
-cd "$HOME/Projects/apps"
-npx --yes create-expo-app@latest "$NAME"
-
+echo "📦 Creating monorepo at $TARGET..."
+mkdir -p "$TARGET"
+cp -r "$HOME/AI-Workspace/templates/monorepo/." "$TARGET/"
 cd "$TARGET"
-cp -rn "$HOME/AI-Workspace/templates/expo-app/." . 2>/dev/null || true
 chmod +x .solyd/flows/*.sh 2>/dev/null || true
 touch progress.txt
 
-# react-native-web is what makes the fast web feedback loop possible
-npx --yes expo install react-dom react-native-web @expo/metro-runtime
+# Name the workspace root after the project
+node -e "var f=\"package.json\";var p=require(\"./\"+f);p.name=\"$NAME\";require(\"fs\").writeFileSync(f,JSON.stringify(p,null,2)+\"\n\")"
+
+if [ -z "$BARE" ]; then
+  echo "📱 Adding the Expo client at apps/mobile..."
+  ( cd apps && npx --yes create-expo-app@latest mobile )
+  rm -f apps/.gitkeep
+
+  # react-native-web is what makes the fast web feedback loop possible
+  ( cd apps/mobile && npx --yes expo install react-dom react-native-web @expo/metro-runtime )
+fi
+
+command -v pnpm > /dev/null 2>&1 && pnpm install || true
 
 [ -d .git ] || git init -q .
 git add -A
 git -c user.name="AI Developer" -c user.email="ai@localhost" \
-    commit -qm "chore: scaffold expo app with ralph UI feedback loop" || true
+    commit -qm "chore: scaffold monorepo with ralph UI feedback loop" || true
 
 echo ""
 echo "✅ Ready. Next:"
 echo "   cd $TARGET"
+echo "   \$EDITOR PRD.md      # describe what to build"
 echo "   ralph"
 EOF'
-sudo chmod +x /usr/local/bin/solyd-new-expo-app
+sudo chmod +x /usr/local/bin/solyd-new-project
 
 # ------------------------------------------------------------------------------
 # iOS runner configuration (Loop 3). Defaults to 'none' — web and Android
@@ -1391,8 +1526,9 @@ fi
 echo "     The certificate is self-signed — accept the warning on first connect."
 echo ""
 echo "3. How to run an automated AI loop in ANY folder:"
-echo "   cd ~/Projects/apps/my-app"
+echo "   cd ~/Projects/my-thing"
 echo "   git init"
+echo "   \$EDITOR PRD.md      # the task backlog ralph works through"
 echo "   ralph"
 echo ""
 if [ -n "$TELEGRAM_READY" ]; then
@@ -1415,9 +1551,11 @@ echo "   - Emulator AVD 'solyd_pixel' — start it with: emulator -avd solyd_pix
 echo "   - Android Studio will detect this SDK on first launch"
 echo "   - Reboot first: the emulator needs your new 'kvm' group membership"
 echo ""
-echo "6. Expo apps with an agent UI feedback loop:"
-echo "   solyd-new-expo-app my-app     # scaffolds + wires the gate"
-echo "   cd ~/Projects/apps/my-app && ralph"
+echo "6. Full-stack projects with an agent UI feedback loop:"
+echo "   solyd-new-project my-thing    # pnpm monorepo + Expo client + gate"
+echo "   cd ~/Projects/my-thing && ralph"
+echo "   - One directory per project under ~/Projects; each is a monorepo of"
+echo "     apps/ (clients), services/ (backends) and packages/ (shared code)"
 echo "   - The gate reads the ACCESSIBILITY TREE, not screenshots, so every"
 echo "     interactive element needs testID + accessibilityLabel to be seen"
 echo "   - List required labels in .solyd/expected-web.txt; the gate fails"
