@@ -18,7 +18,7 @@ set -e
 echo "🚀 Starting Full AI & Software Development Environment Setup..."
 
 # 1. System Updates & Essential Utilities
-echo "📦 [1/10] Updating System & Installing Essential Tools..."
+echo "📦 [1/11] Updating System & Installing Essential Tools..."
 sudo apt update && sudo apt upgrade -y
 sudo apt install -y \
   curl wget git build-essential unzip jq tmux screen htop \
@@ -29,18 +29,18 @@ sudo apt install -y \
 sudo systemctl enable --now ssh
 
 # 2. NVIDIA Drivers & CUDA Setup
-echo "🟢 [2/10] Auto-detecting & Installing NVIDIA Drivers & CUDA..."
+echo "🟢 [2/11] Auto-detecting & Installing NVIDIA Drivers & CUDA..."
 sudo ubuntu-drivers install
 sudo apt install -y nvidia-cuda-toolkit
 
 # 3. KVM / Virtualization (For Android Emulator Acceleration)
-echo "⚡ [3/10] Setting up KVM for Android Emulation..."
+echo "⚡ [3/11] Setting up KVM for Android Emulation..."
 sudo apt install -y qemu-system libvirt-daemon-system libvirt-clients bridge-utils virt-manager
 sudo usermod -aG kvm $USER
 sudo usermod -aG libvirt $USER
 
 # 4. Docker Engine Setup
-echo "🐳 [4/10] Installing Docker Engine..."
+echo "🐳 [4/11] Installing Docker Engine..."
 if ! command -v docker &> /dev/null; then
   curl -fsSL https://get.docker.com -o get-docker.sh
   sudo sh get-docker.sh
@@ -49,7 +49,7 @@ fi
 sudo usermod -aG docker $USER
 
 # 5. Node.js (LTS), Package Managers & Android Studio
-echo "🟢 [5/10] Installing Node.js LTS, pnpm, Expo CLI, and Android Studio..."
+echo "🟢 [5/11] Installing Node.js LTS, pnpm, Expo CLI, and Android Studio..."
 curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -
 sudo apt install -y nodejs
 sudo npm install -g npm@latest pnpm yarn expo-cli
@@ -58,20 +58,20 @@ sudo npm install -g npm@latest pnpm yarn expo-cli
 sudo snap install android-studio --classic
 
 # 6. Python Tooling & Aider
-echo "🐍 [6/10] Installing UV, and Aider..."
+echo "🐍 [6/11] Installing UV, and Aider..."
 curl -LsSf https://astral.sh/uv/install.sh | sh
 uv tool install --python 3.12 aider-chat
 uv tool update-shell
 
 # 7. Ollama & Qwen Coder Model Setup
-echo "🦙 [7/10] Installing Ollama & Pulling qwen2.5-coder:7b..."
+echo "🦙 [7/11] Installing Ollama & Pulling qwen2.5-coder:7b..."
 curl -fsSL https://ollama.com/install.sh | sh
 sudo systemctl enable --now ollama
 sleep 5
 ollama pull qwen2.5-coder:7b
 
 # 8. Directory Structure & Global 'ralph' Harness
-echo "📁 [8/10] Creating Project Workspace & Global 'ralph' Harness..."
+echo "📁 [8/11] Creating Project Workspace & Global 'ralph' Harness..."
 
 # Sensible Directory Structure
 mkdir -p ~/Projects/apps                   # React Native, iOS/Android, Web Apps
@@ -138,6 +138,21 @@ touch progress.txt
 
 AIDER_BIN=$(command -v aider || echo "$HOME/.local/bin/aider")
 
+PROJECT_NAME=$(basename "$PWD")
+STARTED_AT=$(date +%s)
+COMMITS_MADE=0
+
+# Telegram reporting is optional: no config, no output, no failure
+notify() {
+  command -v solyd-notify > /dev/null 2>&1 && solyd-notify "$1"
+  return 0
+}
+
+elapsed() {
+  local secs=$(( $(date +%s) - STARTED_AT ))
+  printf "%dh %dm" $((secs / 3600)) $(( (secs % 3600) / 60 ))
+}
+
 echo "🚀 Starting Hybrid Ralph Loop (Max Iterations: $MAX_LOOPS)..."
 echo "🧠 Architect: $ARCHITECT_MODEL"
 echo "✍️  Editor:   $EDITOR_MODEL"
@@ -172,6 +187,7 @@ for ((i=1; i<=MAX_LOOPS; i++)); do
 
     if ! git diff --cached --quiet; then
       git commit -m "ralph(iter-$i): completed automated task"
+      COMMITS_MADE=$((COMMITS_MADE + 1))
       STUCK_COUNT=0
     else
       echo "⚠️ Aider made no file changes this iteration."
@@ -186,22 +202,43 @@ for ((i=1; i<=MAX_LOOPS; i++)); do
 
     if [ $STUCK_COUNT -ge $STUCK_LIMIT ]; then
       echo "🛑 CIRCUIT BREAKER TRIGGERED: Agent failed $STUCK_LIMIT consecutive times. Halting."
+      notify "🛑 ralph HALTED: $PROJECT_NAME
+Circuit breaker tripped after $STUCK_LIMIT consecutive test failures.
+Stopped at iteration $i of $MAX_LOOPS after $(elapsed).
+$COMMITS_MADE commits landed before the failure.
+Needs a human look."
       exit 1
     fi
   fi
 
   if grep -q "ALL_TASKS_COMPLETE" progress.txt 2>/dev/null; then
     echo "🎉 All tasks in PRD.md are completed! Exiting Ralph Loop successfully."
+    notify "🎉 ralph FINISHED: $PROJECT_NAME
+All PRD tasks are complete.
+$i iterations, $COMMITS_MADE commits, $(elapsed) runtime.
+
+Last commits:
+$(git log -5 --format="- %s" 2>/dev/null)"
+    ALL_DONE=1
     break
   fi
 
 done
+
+# Loop ran out of iterations without finishing the backlog
+if [ -z "$ALL_DONE" ]; then
+  OPEN_TASKS=$(grep -c "^- \[ \]" PRD.md 2>/dev/null || true)
+  notify "⏸️ ralph PAUSED: $PROJECT_NAME
+Hit the $MAX_LOOPS iteration limit with work still queued.
+$COMMITS_MADE commits, $(elapsed) runtime, ${OPEN_TASKS:-?} tasks still open.
+Run ralph again to continue."
+fi
 EOF'
 
 sudo chmod +x /usr/local/bin/ralph
 
 # 9. Native Remote Desktop (GNOME Remote Desktop / grdctl)
-echo "🖥️  [9/10] Configuring Ubuntu's Native Remote Desktop (RDP)..."
+echo "🖥️  [9/11] Configuring Ubuntu's Native Remote Desktop (RDP)..."
 
 # Ubuntu's built-in RDP server and xrdp both bind port 3389 — make sure only the
 # native GNOME implementation is active if xrdp was installed previously.
@@ -327,11 +364,211 @@ if command -v ufw &> /dev/null && sudo ufw status | grep -q "Status: active"; th
   sudo ufw allow 3390/tcp
 fi
 
+# 10. Telegram Reporting (task notifications + daily digest)
+echo "📨 [10/11] Installing Telegram Notifier & Daily Report..."
+
+# ------------------------------------------------------------------------------
+# solyd-notify: sends a plain-text Telegram message. Takes the text as arguments
+# or on stdin. Exits quietly when Telegram is not configured, so the ralph loop
+# never fails because of a missing token.
+# ------------------------------------------------------------------------------
+sudo bash -c 'cat << "EOF" > /usr/local/bin/solyd-notify
+#!/bin/bash
+CONFIG="${SOLYD_TELEGRAM_CONFIG:-$HOME/.config/solyd/telegram.env}"
+
+[ -f "$CONFIG" ] || exit 0
+# shellcheck source=/dev/null
+. "$CONFIG"
+[ -n "$TELEGRAM_BOT_TOKEN" ] && [ -n "$TELEGRAM_CHAT_ID" ] || exit 0
+
+if [ $# -gt 0 ]; then MSG="$*"; else MSG="$(cat)"; fi
+[ -n "$MSG" ] || exit 0
+
+# Telegram rejects anything over 4096 characters
+if [ ${#MSG} -gt 4000 ]; then
+  MSG="${MSG:0:4000}
+... (truncated)"
+fi
+
+HTTP=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 \
+  -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
+  --data-urlencode "chat_id=$TELEGRAM_CHAT_ID" \
+  --data-urlencode "text=$MSG" \
+  --data-urlencode "disable_web_page_preview=true")
+
+if [ "$HTTP" != "200" ]; then
+  echo "solyd-notify: Telegram API returned HTTP $HTTP" >&2
+  exit 1
+fi
+EOF'
+sudo chmod +x /usr/local/bin/solyd-notify
+
+# ------------------------------------------------------------------------------
+# solyd-daily-report: walks ~/Projects, summarises what the agents committed in
+# the last 24h plus machine health, and pushes it to Telegram.
+# Run manually any time, or let the systemd timer fire it at 20:00.
+# ------------------------------------------------------------------------------
+sudo bash -c 'cat << "EOF" > /usr/local/bin/solyd-daily-report
+#!/bin/bash
+SINCE="${SOLYD_REPORT_SINCE:-24 hours ago}"
+PROJECT_ROOT="${SOLYD_PROJECT_ROOT:-$HOME/Projects}"
+
+REPORT=""
+# Appends one line plus a real newline (avoids fragile escaping in this heredoc)
+add() {
+  REPORT="$REPORT$1
+"
+}
+
+add "📊 Solyd Daily Report - $(date "+%a %d %b %Y")"
+add "------------------------------"
+
+TOTAL_COMMITS=0
+TOTAL_RALPH=0
+ACTIVE=""
+
+while IFS= read -r gitdir; do
+  repo="$(dirname "$gitdir")"
+  commits=$(git -C "$repo" log --since="$SINCE" --oneline 2>/dev/null | wc -l | tr -d "[:space:]")
+  [ "${commits:-0}" -eq 0 ] && continue
+
+  ralph_commits=$(git -C "$repo" log --since="$SINCE" --oneline --grep="^ralph(iter" 2>/dev/null | wc -l | tr -d "[:space:]")
+  TOTAL_COMMITS=$((TOTAL_COMMITS + commits))
+  TOTAL_RALPH=$((TOTAL_RALPH + ralph_commits))
+
+  name="${repo#$PROJECT_ROOT/}"
+  ACTIVE="$ACTIVE- $name: $commits commits ($ralph_commits from ralph)
+"
+
+  if [ -f "$repo/PRD.md" ]; then
+    open_tasks=$(grep -c "^- \[ \]" "$repo/PRD.md" 2>/dev/null || true)
+    done_tasks=$(grep -c "^- \[[xX]\]" "$repo/PRD.md" 2>/dev/null || true)
+    ACTIVE="$ACTIVE    PRD: ${done_tasks:-0} done / ${open_tasks:-0} open
+"
+  fi
+
+  if [ -f "$repo/progress.txt" ] && grep -q "ALL_TASKS_COMPLETE" "$repo/progress.txt" 2>/dev/null; then
+    ACTIVE="$ACTIVE    ✅ all tasks complete
+"
+  fi
+done < <(find "$PROJECT_ROOT" -maxdepth 4 -type d -name .git 2>/dev/null)
+
+if [ -n "$ACTIVE" ]; then
+  add "🤖 $TOTAL_COMMITS commits in 24h, $TOTAL_RALPH from autonomous loops"
+  add ""
+  REPORT="$REPORT$ACTIVE"
+else
+  add "😴 No repository activity in the last 24h."
+fi
+
+# Machine health
+add ""
+add "🖥️ Machine"
+add "- Disk: $(df -h "$HOME" | awk "NR==2 {print \$4\" free of \"\$2\" (\"\$5\" used)\"}")"
+add "- Load:$(uptime | sed "s/.*load average[s]*://")"
+
+if command -v nvidia-smi > /dev/null 2>&1; then
+  GPU=$(nvidia-smi --query-gpu=name,utilization.gpu,memory.used,memory.total,temperature.gpu \
+        --format=csv,noheader,nounits 2>/dev/null | head -1)
+  [ -n "$GPU" ] && add "- GPU: $(echo "$GPU" | awk -F", " "{print \$1\" | \"\$2\"% util | \"\$3\"/\"\$4\" MiB | \"\$5\"C\"}")"
+fi
+
+if systemctl is-active --quiet ollama 2>/dev/null; then
+  add "- Ollama: running"
+else
+  add "- Ollama: STOPPED"
+fi
+
+if [ "$1" = "--stdout" ]; then
+  echo "$REPORT"
+else
+  echo "$REPORT" | solyd-notify
+fi
+EOF'
+sudo chmod +x /usr/local/bin/solyd-daily-report
+
+# ------------------------------------------------------------------------------
+# Schedule the digest at 20:00 daily via a user-level systemd timer. Linger was
+# enabled in step 9, so this fires even when nobody is logged in.
+# ------------------------------------------------------------------------------
+mkdir -p ~/.config/systemd/user
+
+cat << 'EOF' > ~/.config/systemd/user/solyd-daily-report.service
+[Unit]
+Description=Solyd daily AI activity report via Telegram
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/solyd-daily-report
+EOF
+
+cat << 'EOF' > ~/.config/systemd/user/solyd-daily-report.timer
+[Unit]
+Description=Send the Solyd daily AI activity report
+
+[Timer]
+OnCalendar=*-*-* 20:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+
+# ------------------------------------------------------------------------------
+# Interactive Telegram credentials
+# ------------------------------------------------------------------------------
+mkdir -p ~/.config/solyd
+
+echo ""
+echo "📨 [Optional] Telegram Reporting"
+echo "Create a bot with @BotFather, then message it once and get your chat ID"
+echo "from @userinfobot (or https://api.telegram.org/bot<TOKEN>/getUpdates)."
+read -rp "Configure Telegram notifications now? (y/N): " -n 1
+echo ""
+
+if [[ $REPLY =~ ^[Yy]$ ]]; then
+  read -rsp "Bot token (input hidden): " TG_TOKEN
+  echo ""
+  read -rp "Chat ID: " TG_CHAT
+
+  if [ -n "$TG_TOKEN" ] && [ -n "$TG_CHAT" ]; then
+    umask 077
+    cat << EOF > ~/.config/solyd/telegram.env
+# Telegram credentials for solyd-notify / solyd-daily-report
+TELEGRAM_BOT_TOKEN="$TG_TOKEN"
+TELEGRAM_CHAT_ID="$TG_CHAT"
+EOF
+    chmod 600 ~/.config/solyd/telegram.env
+
+    if solyd-notify "Solyd machine setup complete. Reporting is live."; then
+      echo "✅ Telegram connected — check your chat for the test message."
+      TELEGRAM_READY=1
+    else
+      echo "⚠️ Could not reach Telegram. Verify the token/chat ID in"
+      echo "   ~/.config/solyd/telegram.env and retry with: solyd-notify test"
+    fi
+  else
+    echo "⚠️ Token or chat ID missing. Skipping."
+  fi
+else
+  echo "⚠️ Skipped. Add credentials later to ~/.config/solyd/telegram.env"
+fi
+
+# Activate the timer (needs the user session bus)
+if [ -S "/run/user/$(id -u)/bus" ]; then
+  systemctl --user daemon-reload
+  systemctl --user enable --now solyd-daily-report.timer
+  echo "⏰ Daily report scheduled for 20:00."
+else
+  echo "⚠️ No user session bus — enable the digest later with:"
+  echo "   systemctl --user enable --now solyd-daily-report.timer"
+fi
+
 # ==============================================================================
 # MISSING FIXES PATCH
 # ==============================================================================
 
-echo "🔧 [10/10] Applying Pro-Mode System Patches..."
+echo "🔧 [11/11] Applying Pro-Mode System Patches..."
 
 # 1. Fix React Native / Expo File Watcher Limit (ENOSPC fix)
 echo "fs.inotify.max_user_watches=524288" | sudo tee -a /etc/sysctl.conf
@@ -409,4 +646,18 @@ echo "3. How to run an automated AI loop in ANY folder:"
 echo "   cd ~/Projects/apps/my-app"
 echo "   git init"
 echo "   ralph"
+echo ""
+if [ -n "$TELEGRAM_READY" ]; then
+  echo "4. Telegram reporting is ACTIVE:"
+  echo "   - ralph messages you when a run finishes, stalls, or trips the breaker"
+  echo "   - Daily digest arrives at 20:00 (systemd --user timer)"
+  echo "   - Preview it now:  solyd-daily-report --stdout"
+  echo "   - Send it now:     solyd-daily-report"
+  echo "   - Change the time: systemctl --user edit solyd-daily-report.timer"
+else
+  echo "4. To enable Telegram reporting later:"
+  echo "   Put TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in"
+  echo "   ~/.config/solyd/telegram.env (chmod 600), then test with:"
+  echo "   solyd-notify \"hello\" && systemctl --user enable --now solyd-daily-report.timer"
+fi
 echo "=========================================================================="
