@@ -296,42 +296,72 @@ in that project's `PRD.md`; this file is about *how* to build, never *what*.
   assertions, remove entries from `.solyd/expected-*.txt`, add `@ts-ignore`, or
   widen a type to `any` in order to get a green gate. A failing gate is
   information; suppressing it destroys the only feedback that exists.
+- Design before code. Do not start building screens until the PRD has design
+  principles and user flows. An agent that skips this invents both, differently,
+  on every screen.
 - If a task turns out to be wrong or impossible, write that in `progress.txt`
-  and mark the task blocked. Do not silently substitute a different task.
+  and mark it blocked. Do not silently substitute a different task.
 - Record what you did in `progress.txt` in plain language — it is the only
   account of your reasoning anyone reads later.
+
+## The stack
+
+This is settled. Do not introduce an alternative to anything listed here without
+it being an explicit task in the PRD.
+
+| Concern | Use |
+|---|---|
+| Language | TypeScript, `strict` |
+| Package manager | pnpm workspaces |
+| Mobile | Expo (React Native) |
+| Web | Next.js on Cloudflare Workers via `@opennextjs/cloudflare` |
+| Backend | Cloudflare Workers |
+| UI — web | HeroUI, with Fragment UI for pre-composed SaaS views |
+| UI — mobile | HeroUI Native |
+| State | Zustand |
+| Auth + billing | Clerk |
+| Errors | Sentry (production only) |
+| i18n | English and German, both required |
+| Mobile builds | Codemagic (Android dev builds are local — see Builds) |
+| Web CI/CD | GitHub Actions → Cloudflare |
+
+Notes that will save you a wrong turn:
+
+- `@cloudflare/next-on-pages` is **deprecated**. Use `@opennextjs/cloudflare`,
+  which runs on the Node.js runtime rather than edge-only.
+- HeroUI (web) and HeroUI Native (mobile) are separate packages sharing a design
+  language. They are not interchangeable imports.
+- Fragment UI is **web-only** and depends on HeroUI as a peer. It is early-stage:
+  wrap its components in `packages/ui` rather than importing it directly into
+  screens, so replacing it later is a local change.
 
 ## Monorepo boundaries
 
 ```
-apps/       user-facing clients. Never import from another app.
-services/   backends. Own their data; talk to each other over HTTP, not imports.
-packages/   shared code. May not import from apps/ or services/.
+apps/mobile     Expo client
+apps/web        Next.js on Cloudflare
+services/*      Cloudflare Workers. Own their data; talk over HTTP, not imports.
+packages/ui     shared design-system wrappers
+packages/shared types, API contracts, validation schemas
 ```
 
-- Code needed by two packages moves to `packages/`, it does not get copied.
+- `apps/` never imports from another `apps/`. `packages/` never imports from
+  `apps/` or `services/`.
+- Code needed by two packages moves to `packages/`; it does not get copied.
 - Dependencies: `pnpm add --filter <package> <dep>`. Never hand-edit a lockfile.
-- Run scripts from the repo root (`pnpm test`, `pnpm typecheck`), not per package.
+- Run scripts from the repo root (`pnpm test`, `pnpm typecheck`).
 
 ## TypeScript
 
-- `strict` on. No `any` — use `unknown` and narrow it.
-- Types describe the boundary: exported functions, API payloads, component
-  props. Inference handles the rest; do not annotate every local.
-- Shared request/response types belong in `packages/`, imported by both sides,
-  so client and server cannot drift.
+- `strict` on. No `any` — use `unknown` and narrow.
+- Types describe boundaries: exported functions, API payloads, component props.
+  Inference handles the rest; do not annotate every local.
+- Request/response types live in `packages/shared` and are imported by both
+  client and server, so the two cannot drift.
+- Validate at runtime where data enters the system. A TypeScript type is not a
+  runtime check; use a schema validator at every boundary.
 
-## APIs
-
-- Validate every input at the boundary, before it reaches business logic.
-  Trust nothing from a client, a query string, or an env var.
-- One error shape across all endpoints, with a stable machine-readable code.
-- Return the status code that reflects reality: 400 for bad input, 401 for
-  unauthenticated, 403 for unauthorised, 404 for missing, 5xx only for genuine
-  server faults.
-- Parameterised queries only. Never build SQL by string concatenation.
-
-## UI
+## UI and design
 
 - **Every interactive element carries both `testID` and `accessibilityLabel`.**
   The automated gate drives the app through its accessibility tree; an element
@@ -339,14 +369,118 @@ packages/   shared code. May not import from apps/ or services/.
 - When adding an element a user must reach, append its `accessibilityLabel` to
   `.solyd/expected-web.txt` in the same commit.
 - Handle the three states every async view has: loading, error, empty. A screen
-  that only renders the happy path is unfinished.
+  that renders only the happy path is unfinished.
+- Compose from the design system. Do not hand-roll a button, input, modal or
+  toast that HeroUI already provides.
 - Labels describe intent ("Sign in"), not appearance ("blue button").
+- Follow the design principles in the project's PRD. If a decision is not
+  covered by them, add it there rather than deciding ad hoc in one component.
 
-## Secrets and configuration
+## State
 
-- No credentials, tokens or keys in source or in commits — read them from the
-  environment and document the variable in the README.
-- Commit a `.env.example` with empty values; never commit `.env`.
+- Zustand for shared client state. One store per domain, not one global store.
+- Server data is not client state. Do not mirror API responses into Zustand —
+  fetch and cache them, and keep the store for genuine UI/session state.
+- Keep stores serialisable. No class instances, no functions in state.
+
+## Auth and billing
+
+- Clerk owns authentication, sessions and billing. Never hand-roll password
+  handling, token refresh, or a subscription state machine.
+- Authorise on the server, always. A hidden UI element is not access control —
+  every Worker route verifies the Clerk session and the caller's entitlement.
+- Read entitlements from Clerk rather than caching them in your own database,
+  so billing state has one source of truth.
+
+## Internationalisation
+
+- English and German are both first-class. A feature is not complete with only
+  one.
+- No user-visible string is hard-coded. All text comes from translation files,
+  including error messages, empty states and validation feedback.
+- Keys are semantic (`auth.signIn.submit`), never the English text itself.
+- Never machine-translate into the repo and call it done — mark unreviewed
+  strings so they can be found.
+- Format dates, numbers and currency through the locale, not by hand.
+
+## Backend
+
+- One Worker per service, configured in `wrangler.jsonc`.
+- Validate every input at the boundary before it reaches business logic. Trust
+  nothing from a client, a query string, or an environment variable.
+- One error shape across all endpoints, with a stable machine-readable code.
+- Return the status code that reflects reality: 400 bad input, 401
+  unauthenticated, 403 unauthorised, 404 missing, 5xx only for genuine faults.
+- Parameterised queries only. Never build SQL by string concatenation.
+- Secrets come from Worker secrets/bindings, never from committed files.
+
+## Security
+
+The standard is proportionate: correct by default, no expensive tooling.
+
+- **Least-privilege tokens.** Every Cloudflare API token is scoped to a single
+  account and only the resources that project needs. Never reuse a token across
+  projects, and never use a global API key.
+- No credentials, tokens or keys in source or in commits. Read them from the
+  environment; document each variable in the README. Commit `.env.example` with
+  empty values; never commit `.env`.
+- Rely on the platform rather than building your own: Clerk for auth, Cloudflare
+  for TLS/WAF/rate limiting, GitHub for secret scanning and Dependabot. These
+  are free at this scale and better than a bespoke equivalent.
+- Rate-limit any unauthenticated endpoint.
+- Never log secrets, tokens, or personal data. Sentry scrubbing is not a licence
+  to log them in the first place.
+- Dependencies: prefer the standard library, then a well-maintained package.
+  Every new dependency is attack surface — justify it in the commit message.
+
+## Observability
+
+- Sentry in production only. Never initialise it in development or tests; the
+  noise is worthless and the quota is not free.
+- Capture errors with enough context to act on: what the user was doing, which
+  release, which environment. An error with no context is a ticket nobody can
+  close.
+- Do not swallow exceptions to keep a dashboard clean.
+
+## Builds and releases
+
+| What | Where | Why |
+|---|---|---|
+| Android dev build | **Local** (`npx expo run:android`) | The SDK is on this machine — free, instant, no queue |
+| iOS dev build | Codemagic | Needs macOS; produces the ad-hoc dev-client IPA |
+| Android + iOS release | Codemagic, triggered by GitHub Actions | One mobile pipeline, store submission included |
+| Web + Workers | GitHub Actions → Cloudflare | Same place as the code |
+
+- An Expo **development build** loads its JS from Metro at runtime. Rebuild the
+  native shell only when native code or a native dependency changes — never to
+  ship a JS change.
+- iOS device installs need the device UDID registered **before** the build.
+  Adding a phone later requires a new build.
+- Releases are cut from `main`, never from a feature branch.
+
+## Commits, versioning and changelogs
+
+- **Conventional Commits**, enforced: `type(scope): summary`.
+  Types: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`, `build`, `ci`.
+  Scope is the workspace package (`feat(mobile):`, `fix(api):`).
+- Breaking changes get a `!` and a `BREAKING CHANGE:` footer.
+- One logical change per commit, present tense, describing the change and why.
+- Versioning and changelogs come from Changesets. Every user-visible change
+  ships with a changeset; the changelog is generated, never hand-edited.
+- Never commit commented-out code or debug logging.
+
+## Documentation
+
+- Markdown, committed next to the code it describes.
+- Every package has a README covering what it is, how to run it, and its
+  environment variables.
+- Architectural decisions that were not obvious get a short ADR in `docs/adr/`:
+  context, the decision, the alternatives rejected and why. Write it when the
+  decision is made, not later.
+- Document behaviour and intent, not syntax. If a comment restates the code,
+  delete it.
+- Keep docs in the same commit as the change. Documentation that lags is worse
+  than none, because it is trusted and wrong.
 
 ## Testing
 
@@ -354,12 +488,7 @@ packages/   shared code. May not import from apps/ or services/.
   when you rename a private function is a liability.
 - Every bug fix starts with a test that reproduces it.
 - Tests must be deterministic: no real network, no wall-clock dependence, no
-  reliance on test execution order.
-
-## Commits
-
-- One logical change per commit, present tense, describing the change and why.
-- Never commit commented-out code or debug logging.
+  reliance on execution order.
 EOF
 fi
 
@@ -368,12 +497,63 @@ cat << 'EOF' > ~/AI-Workspace/templates/PRD.md
 # Project Specification (PRD)
 
 ## Objective
-- Define the main goal of this module/project.
+- Define the main goal of this project.
+
+## Scope
+
+- Who is this for and what problem does it solve?
+- What is explicitly out of scope?
+
+## How to build it
+
+Engineering standards — the stack, monorepo boundaries, the accessibility
+contract, security, commits and releases — live in
+`~/AI-Workspace/ARCHITECTURE.md` and are loaded into every session
+automatically. They are not repeated here.
+
+**This file describes what to build. That one describes how.**
+
+## Design Principles
+
+<!-- SOLYD-UNFILLED — delete this whole comment once written. ralph refuses to
+     start while it is here, because an agent that codes without principles
+     invents them differently on every screen.
+
+     Three to six principles specific to THIS product. Each should be a decision
+     that resolves a future argument. State the trade-off, not a platitude.
+
+       Bad:  "The UI should be clean and intuitive."
+       Good: "Speed over discoverability — the primary action is always
+              reachable in one tap; secondary actions may hide behind a menu."
+
+     Cover at least: visual tone, information density, how errors are surfaced,
+     and what this product deliberately refuses to do.
+-->
+
+## User Flows
+
+<!-- SOLYD-UNFILLED — delete this whole comment once written.
+
+     The paths a user actually takes, end to end, before any screen exists.
+     Name the states the UI must handle, not just the happy path.
+
+       Sign up
+         1. Landing -> "Create account"
+         2. Clerk sign-up (email or OAuth)
+         3. Verify email     [states: pending, expired link, already verified]
+         4. Choose a plan    [states: loading prices, payment declined]
+         5. Dashboard, empty state with one clear next action
+
+     Every state listed becomes something the UI must render and the gate can
+     check. Flows that stop at the happy path produce apps that break on the
+     first real user.
+-->
 
 ## Task Backlog
-- [ ] Task 1: Setup project structure and basic dependencies.
-- [ ] Task 2: Create unit tests for core logic.
-- [ ] Task 3: Implement core functionality.
+- [ ] Task 1: Scaffold navigation and the first screen in apps/mobile.
+- [ ] Task 2: Add accessibility labels and populate .solyd/expected-web.txt.
+- [ ] Task 3: Stand up services/api with the first endpoint.
+- [ ] Task 4: Share request/response types via packages/shared.
 EOF
 
 touch ~/AI-Workspace/templates/progress.txt
@@ -418,6 +598,20 @@ if [ ! -f "PRD.md" ]; then
 fi
 
 touch progress.txt
+
+# Design before code. The PRD template ships Design Principles and User Flows
+# as SOLYD-UNFILLED comment blocks; refuse to run while they are still there.
+# Cheap to satisfy, and it stops the loop inventing a design one screen at a
+# time. Projects whose PRD never had the markers are unaffected.
+if grep -q "SOLYD-UNFILLED" PRD.md 2>/dev/null; then
+  echo "❌ PRD.md still has unfilled design sections:"
+  grep -n "SOLYD-UNFILLED" PRD.md | sed "s/^/   line /"
+  echo ""
+  echo "Write the Design Principles and User Flows first, then delete those"
+  echo "comment blocks. Coding before they exist produces an app whose screens"
+  echo "each invent their own design."
+  exit 1
+fi
 
 AIDER_BIN=$(command -v aider || echo "$HOME/.local/bin/aider")
 
@@ -1447,31 +1641,6 @@ cat << 'EOF' > "$SCAFFOLD/.solyd/expected-web.txt"
 # both "the screen did not render" and "the element has no label".
 EOF
 
-cat << 'EOF' > "$SCAFFOLD/PRD.md"
-# Project Specification (PRD)
-
-## Objective
-- Define the main goal of this project.
-
-## Scope
-
-- Who is this for and what problem does it solve?
-- What is explicitly out of scope?
-
-## How to build it
-
-Engineering standards — monorepo boundaries, the accessibility contract,
-TypeScript rules, API conventions — live in `~/AI-Workspace/ARCHITECTURE.md` and
-are loaded into every session automatically. They are not repeated here.
-
-**This file describes what to build. That one describes how.**
-
-## Task Backlog
-- [ ] Task 1: Scaffold navigation and the first screen in apps/mobile.
-- [ ] Task 2: Add accessibility labels and populate .solyd/expected-web.txt.
-- [ ] Task 3: Stand up services/api with the first endpoint.
-- [ ] Task 4: Share request/response types via packages/shared.
-EOF
 
 # --- One-shot project creator -------------------------------------------------
 sudo bash -c 'cat << "EOF" > /usr/local/bin/solyd-new-project
@@ -1509,6 +1678,10 @@ cp -r "$HOME/AI-Workspace/templates/monorepo/." "$TARGET/"
 cd "$TARGET"
 chmod +x .solyd/flows/*.sh 2>/dev/null || true
 touch progress.txt
+
+# One PRD template, shared with what ralph seeds. Its Design Principles and
+# User Flows sections must be filled in before ralph will run.
+cp "$HOME/AI-Workspace/templates/PRD.md" PRD.md
 
 # Name the workspace root after the project
 node -e "var f=\"package.json\";var p=require(\"./\"+f);p.name=\"$NAME\";require(\"fs\").writeFileSync(f,JSON.stringify(p,null,2)+\"\n\")"
