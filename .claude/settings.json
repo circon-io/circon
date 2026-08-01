@@ -2,7 +2,12 @@
   "permissions": {
     "allow": [
       "Bash(git checkout *)",
-      "Bash(git commit *)"
+      "Bash(git commit *)",
+      "Bash(pnpm --version)",
+      "Bash(npm --version)",
+      "Bash(node -e \"const{styleText}=require\\('node:util'\\);console.log\\('styleText:', typeof styleText\\)\")",
+      "Bash(node -e \"const{parseArgs}=require\\('node:util'\\);console.log\\('parseArgs:', typeof parseArgs\\)\")",
+      "Bash(python3 -)"
     ]
   }
 }

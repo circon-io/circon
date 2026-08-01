@@ -1,0 +1,27 @@
+{
+  "name": "@circon/cli",
+  "version": "0.1.0",
+  "description": "Autonomous AI development runner: converge the machine, run the agent loop, report on it",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "circon": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "templates"
+  ],
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && chmod +x dist/index.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test 'src/**/*.test.ts'",
+    "prepublishOnly": "pnpm build"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0"
+  }
+}

@@ -1,0 +1,7 @@
+# Accessibility labels that must be present in the running app.
+# One per line; lines starting with # are ignored.
+#
+# The agent maintains this file: every time it builds a screen, it adds the
+# accessibilityLabel of each element a user must be able to reach. The web gate
+# fails if any is missing from the accessibility tree, which catches both
+# "the screen did not render" and "the element has no label".

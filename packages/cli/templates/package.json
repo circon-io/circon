@@ -1,0 +1,10 @@
+{
+  "name": "monorepo",
+  "private": true,
+  "scripts": {
+    "dev": "pnpm --parallel --recursive dev",
+    "build": "pnpm --recursive build",
+    "test": "pnpm --recursive --if-present test",
+    "typecheck": "tsc --noEmit"
+  }
+}

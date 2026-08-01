@@ -1,0 +1,15 @@
+{
+  "name": "circon-machine",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Autonomous AI development machine: Ubuntu bootstrap plus the circon CLI",
+  "scripts": {
+    "build": "pnpm --recursive build",
+    "test": "pnpm --recursive --if-present test",
+    "typecheck": "pnpm --recursive --if-present typecheck",
+    "check:sh": "bash -n init.sh"
+  },
+  "engines": {
+    "node": ">=22.12"
+  }
+}
