@@ -9,7 +9,13 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Run the exact same checks a PR gets, and refuse to release without them.
+  # Without this the release job races CI and could publish a red build.
+  check:
+    uses: ./.github/workflows/ci.yml
+
   release:
+    needs: check
     runs-on: ubuntu-latest
     permissions:
       contents: write        # push the version commit and tags
