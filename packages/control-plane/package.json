@@ -19,5 +19,6 @@
     "@cloudflare/workers-types": "^4.20250109.0",
     "typescript": "^5.9.0",
     "wrangler": "^4.0.0"
-  }
+  },
+  "license": "FSL-1.1-ALv2"
 }
