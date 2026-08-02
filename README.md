@@ -7,7 +7,7 @@ a running app, commits what passes, and messages you when it's done.
 ## Quick start
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/<you>/circon-machine/main/init.sh | bash
+curl -fsSL https://raw.githubusercontent.com/circon-io/circon/main/init.sh | bash
 ```
 
 The bootstrap installs Node and the CLI, nothing more. Two commands finish the job:
