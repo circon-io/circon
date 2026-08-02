@@ -3,66 +3,28 @@
  * Create the resources wrangler cannot declare into existence, then write their
  * ids into the config so `wrangler deploy` can bind them.
  *
- * Durable Objects, routes, assets and observability are all declarative in
+ * Durable Objects, assets, vars and observability are all declarative in
  * wrangler.jsonc. A **D1 database is not**: `database_id` must already exist
  * before deploy, so something has to create it once and remember the id. That
  * is this script, and it is idempotent — it adopts an existing database rather
  * than failing or making a second one.
  *
+ * This talks to the D1 REST API rather than shelling out to wrangler. `wrangler
+ * d1 list` and `d1 create` have no `--json` flag, so the alternative is parsing
+ * a human-readable table that changes between releases — exactly the kind of
+ * brittleness infrastructure code should not have.
+ *
  * Usage:  node scripts/provision.mjs [--write]
  *   --write   persist the resolved id back into wrangler.jsonc
  */
 
-import { execFileSync } from 'node:child_process'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 
-const here = dirname(fileURLToPath(import.meta.url))
-const configPath = join(here, '..', 'wrangler.jsonc')
+const configPath = join(dirname(fileURLToPath(import.meta.url)), '..', 'wrangler.jsonc')
 const DB_NAME = 'circon'
-
-function wrangler(args, { allowFailure = false } = {}) {
-  try {
-    return execFileSync('npx', ['wrangler', ...args], {
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'pipe'],
-    })
-  } catch (error) {
-    if (allowFailure) return ''
-    const detail = error.stderr || error.stdout || error.message
-    throw new Error(`wrangler ${args.join(' ')} failed:\n${detail}`)
-  }
-}
-
-/**
- * `wrangler d1 list --json` is the authoritative answer to "does it exist".
- * Creating unconditionally would either fail or silently produce a duplicate
- * database with a different id, which is far worse than an extra API call.
- */
-function findDatabase(name) {
-  const raw = wrangler(['d1', 'list', '--json'], { allowFailure: true })
-  if (!raw.trim()) return null
-  try {
-    const list = JSON.parse(raw)
-    const match = (Array.isArray(list) ? list : []).find((d) => d.name === name)
-    return match?.uuid ?? match?.database_id ?? null
-  } catch {
-    return null
-  }
-}
-
-function createDatabase(name) {
-  const raw = wrangler(['d1', 'create', name, '--json'])
-  try {
-    const created = JSON.parse(raw)
-    return created.uuid ?? created.database_id ?? null
-  } catch {
-    // Older wrangler prints prose rather than JSON; recover the id from it.
-    const match = raw.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i)
-    return match?.[1] ?? null
-  }
-}
+const API = 'https://api.cloudflare.com/client/v4'
 
 /**
  * Swap the database_id in wrangler.jsonc. Exported so the substitution is
@@ -77,16 +39,71 @@ export function injectDatabaseId(config, databaseId) {
   return config.replace(pattern, `$1${databaseId}$2`)
 }
 
-function main() {
+/** Pull the uuid out of a Cloudflare API envelope, whichever field carries it. */
+export function idFromResult(result) {
+  if (!result || typeof result !== 'object') return null
+  return result.uuid ?? result.database_id ?? result.id ?? null
+}
+
+export function findByName(list, name) {
+  if (!Array.isArray(list)) return null
+  const match = list.find((db) => db?.name === name)
+  return match ? idFromResult(match) : null
+}
+
+function credentials(env = process.env) {
+  const token = env.CLOUDFLARE_API_TOKEN
+  const account = env.CLOUDFLARE_ACCOUNT_ID
+  if (!token) throw new Error('CLOUDFLARE_API_TOKEN is not set')
+  if (!account) throw new Error('CLOUDFLARE_ACCOUNT_ID is not set')
+  return { token, account }
+}
+
+async function api(path, init = {}) {
+  const { token, account } = credentials()
+  const res = await fetch(`${API}/accounts/${account}${path}`, {
+    ...init,
+    headers: {
+      ...(init.headers ?? {}),
+      authorization: `Bearer ${token}`,
+      'content-type': 'application/json',
+    },
+  })
+
+  const body = await res.json().catch(() => null)
+  if (!body?.success) {
+    // Surface Cloudflare's own error text: "Authentication error" here almost
+    // always means the token is missing D1 · Edit, and saying so beats a 403.
+    const detail = body?.errors?.map((e) => `${e.code}: ${e.message}`).join('; ')
+    throw new Error(detail || `Cloudflare API returned HTTP ${res.status}`)
+  }
+  return body.result
+}
+
+async function findDatabase(name) {
+  // The list endpoint paginates; a name filter avoids caring about that.
+  const result = await api(`/d1/database?name=${encodeURIComponent(name)}&per_page=50`)
+  return findByName(result, name)
+}
+
+async function createDatabase(name) {
+  const result = await api('/d1/database', {
+    method: 'POST',
+    body: JSON.stringify({ name }),
+  })
+  return idFromResult(result)
+}
+
+async function main() {
   const write = process.argv.includes('--write')
 
-  let databaseId = findDatabase(DB_NAME)
+  let databaseId = await findDatabase(DB_NAME)
   if (databaseId) {
     console.log(`D1 "${DB_NAME}" already exists (${databaseId}) — adopting it.`)
   } else {
     console.log(`D1 "${DB_NAME}" not found; creating it.`)
-    databaseId = createDatabase(DB_NAME)
-    if (!databaseId) throw new Error('could not determine the new database id')
+    databaseId = await createDatabase(DB_NAME)
+    if (!databaseId) throw new Error('D1 was created but the API returned no id')
     console.log(`Created D1 "${DB_NAME}" (${databaseId}).`)
   }
 
@@ -96,16 +113,13 @@ function main() {
     return
   }
 
-  const config = readFileSync(configPath, 'utf8')
-  writeFileSync(configPath, injectDatabaseId(config, databaseId))
+  writeFileSync(configPath, injectDatabaseId(readFileSync(configPath, 'utf8'), databaseId))
   console.log(`wrangler.jsonc now binds D1 ${databaseId}.`)
 }
 
 if (process.argv[1] && process.argv[1].endsWith('provision.mjs')) {
-  try {
-    main()
-  } catch (error) {
+  main().catch((error) => {
     console.error(error instanceof Error ? error.message : String(error))
     process.exit(1)
-  }
+  })
 }

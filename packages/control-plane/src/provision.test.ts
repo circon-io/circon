@@ -1,7 +1,7 @@
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { injectDatabaseId } from '../scripts/provision.mjs'
+import { injectDatabaseId, idFromResult, findByName } from '../scripts/provision.mjs'
 
 const REAL_CONFIG = readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8')
 
@@ -38,5 +38,40 @@ describe('injecting the D1 id into wrangler.jsonc', () => {
       () => injectDatabaseId('{ "name": "no-d1-here" }', 'abc'),
       /could not find a database_id/,
     )
+  })
+})
+
+describe('reading the Cloudflare API response', () => {
+  test('accepts whichever id field the API returns', () => {
+    // The D1 API has used `uuid`; being tolerant here costs nothing and a wrong
+    // guess would mean provisioning silently produces no id.
+    assert.equal(idFromResult({ uuid: 'a' }), 'a')
+    assert.equal(idFromResult({ database_id: 'b' }), 'b')
+    assert.equal(idFromResult({ id: 'c' }), 'c')
+  })
+
+  test('returns null rather than undefined for junk', () => {
+    assert.equal(idFromResult(null), null)
+    assert.equal(idFromResult({}), null)
+    assert.equal(idFromResult('nope'), null)
+  })
+
+  test('finds the database by exact name', () => {
+    const list = [
+      { name: 'circon-staging', uuid: 'wrong' },
+      { name: 'circon', uuid: 'right' },
+    ]
+    assert.equal(findByName(list, 'circon'), 'right')
+  })
+
+  test('a near-miss name does not match', () => {
+    // Adopting the wrong database would point production at staging data.
+    assert.equal(findByName([{ name: 'circon-staging', uuid: 'x' }], 'circon'), null)
+  })
+
+  test('an empty or malformed list yields null, so create runs', () => {
+    assert.equal(findByName([], 'circon'), null)
+    assert.equal(findByName(null, 'circon'), null)
+    assert.equal(findByName(undefined, 'circon'), null)
   })
 })
