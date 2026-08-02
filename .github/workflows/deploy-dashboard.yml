@@ -32,9 +32,11 @@ jobs:
       # OpenNext builds Next for the Workers runtime, then deploys. Everything
       # it needs is declared in wrangler.jsonc; there is no resource to create
       # out of band, unlike the control plane's D1.
+      # `pnpm run deploy`, not `pnpm deploy` — pnpm has a built-in `deploy`
+      # command that shadows the script and fails with ERR_PNPM_NOTHING_TO_DEPLOY.
       - name: Build and deploy
         working-directory: packages/dashboard
-        run: pnpm deploy
+        run: pnpm run deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}

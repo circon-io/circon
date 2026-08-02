@@ -104,6 +104,10 @@ commit, and every machine picks it up on the next `circon update`.
 - Imports use `.ts` extensions; `rewriteRelativeImportExtensions` emits `.js`.
 - `run()` in `core/exec.ts` never throws on non-zero exit — callers decide what
   failure means, which is what lets `check()` probe freely.
+- **`pnpm run <script>`, never `pnpm <script>`**, when the script name collides
+  with a pnpm built-in — `deploy`, `publish`, `link`, `prune`, `update`, `add`,
+  `setup`, `list` and others. `pnpm deploy` runs pnpm's own deploy command and
+  fails with `ERR_PNPM_NOTHING_TO_DEPLOY`; the script is never reached.
 - Commit messages: `feat: <short lowercase summary>`, no body.
 - Credentials go to `~/.config/circon/*.env` at mode 0600, never `~/.bashrc`.
 

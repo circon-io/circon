@@ -7,7 +7,7 @@
     "build": "pnpm --recursive build",
     "test": "pnpm --recursive --if-present test",
     "typecheck": "pnpm --recursive --if-present typecheck",
-    "deploy": "pnpm --filter ./services/api deploy && pnpm --filter ./apps/web deploy"
+    "deploy": "pnpm --filter ./services/api run deploy && pnpm --filter ./apps/web run deploy"
   },
   "devDependencies": {
     "typescript": "^5.9.0"
