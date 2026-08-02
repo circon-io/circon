@@ -36,7 +36,7 @@ jobs:
       # command that shadows the script and fails with ERR_PNPM_NOTHING_TO_DEPLOY.
       - name: Build and deploy
         working-directory: packages/dashboard
-        run: pnpm run deploy
+        run: pnpm run deploy -- --domain "${{ vars.DASHBOARD_DOMAIN }}"
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}

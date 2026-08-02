@@ -41,21 +41,33 @@ keys and account ids belong here, not in secrets, so they can be diffed.
 | `CLERK_ISSUER` | `https://<your-clerk-domain>` |
 | `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Clerk → API Keys → Publishable key (`pk_live_…`) |
 | `STRIPE_PRICE_PRO` | The Pro price id from step 5 (`price_…`) |
-| `CONTROL_PLANE_URL` | The API Worker's URL — **see the ordering note** |
-| `DASHBOARD_ORIGIN` | The dashboard Worker's URL — **see the ordering note** |
+| `CONTROL_PLANE_DOMAIN` | Hostname for the API Worker, e.g. `api.circon.io`. Zone must be on Cloudflare. |
+| `DASHBOARD_DOMAIN` | Hostname for the dashboard, e.g. `app.circon.io` |
+| `CONTROL_PLANE_URL` | `https://<CONTROL_PLANE_DOMAIN>` |
+| `DASHBOARD_ORIGIN` | `https://<DASHBOARD_DOMAIN>` |
 
-### ⚠️ The ordering problem
+### Domains
 
-`CONTROL_PLANE_URL` and `DASHBOARD_ORIGIN` are each other's deployed URLs, so
-neither is known before the first deploy. Deploying is therefore two passes:
+Both Workers deploy to hostnames you choose rather than `workers.dev` —
+`workers_dev` is `false` in both `wrangler.jsonc`, and the hostname is passed as
+`--domain` at deploy time.
 
-1. Set both to empty strings and run **Deploy control plane** and
-   **Deploy dashboard**.
-2. Read the two `*.workers.dev` URLs from the run output.
-3. Set the real values and re-run both.
+Requirements:
 
-Until pass 2, the dashboard cannot reach the API and CORS rejects it. This is
-expected, not a misconfiguration.
+- The **zone must already be on Cloudflare** (nameservers pointed at it). The
+  hostname itself does not need to exist — attaching a Custom Domain creates the
+  DNS record for you.
+- `CONTROL_PLANE_URL` and `DASHBOARD_ORIGIN` are just `https://` plus the
+  corresponding domain. They are application config — the API uses
+  `DASHBOARD_ORIGIN` for CORS, the dashboard uses `CONTROL_PLANE_URL` to know
+  where to call. **They do not configure routing**; `--domain` does that.
+
+Because you choose the hostnames up front, all four values are known before the
+first deploy and no second pass is needed.
+
+If you would rather use `workers.dev` after all, set `workers_dev` back to
+`true`, drop the `--domain` flags, and register a subdomain at
+**Workers & Pages → your account → Register subdomain** first.
 
 ## 4. Repository permissions
 
@@ -132,9 +144,16 @@ project touches.
 | **D1** · Edit | Account | `d1 list`, `d1 create`, `d1 migrations apply`. Edit implies read. |
 | **Account Settings** · Read | Account | Wrangler validates the account before deploying. |
 
+Custom domains need zone-level permissions as well:
+
+| Permission | Level | Why |
+|---|---|---|
+| **Workers Routes** · Edit | Zone | Attaches the Worker to the hostname |
+| **DNS** · Edit | Zone | A Custom Domain creates the proxied DNS record |
+| **Zone** · Read | Zone | Resolves the zone the hostname belongs to |
+
 **Account Resources** → include only the one account.
-**Zone Resources** → none. Both Workers publish to `*.workers.dev`; a custom
-domain would add **Workers Routes · Edit** on that zone alone.
+**Zone Resources** → include only the zone your domains live on.
 
 Deliberately absent: **KV**, **R2** and **Queues** — nothing declares a binding
 for any of them, so granting them widens the blast radius for nothing. If a
@@ -149,14 +168,15 @@ rather than reaching for the template.
 [ ] GitHub environment `production` with required reviewers
 [ ] 6 secrets  (CLOUDFLARE_API_TOKEN, CLERK_JWKS_URL, CLERK_SECRET_KEY,
                 RUNNER_SECRET_PEPPER, STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET)
-[ ] 6 variables (CLOUDFLARE_ACCOUNT_ID, CLERK_ISSUER,
+[ ] 8 variables (CLOUDFLARE_ACCOUNT_ID, CLERK_ISSUER,
                  NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY, STRIPE_PRICE_PRO,
+                 CONTROL_PLANE_DOMAIN, DASHBOARD_DOMAIN,
                  CONTROL_PLANE_URL, DASHBOARD_ORIGIN)
+[ ] Zone on Cloudflare, token has zone-level Workers Routes/DNS/Zone perms
 [ ] Workflow permissions: read/write + allow PR creation
 [ ] Stripe product, price, webhook endpoint
 [ ] npm: manual first publish, then trusted publisher
 [ ] Clerk: organizations enabled
-[ ] Deploy twice — the URL variables are unknown until after the first pass
 ```
 
 ## Not this repository

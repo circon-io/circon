@@ -6,6 +6,12 @@
   // Required by OpenNext: Next's server code expects Node built-ins.
   "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
   "observability": { "enabled": true },
+
+  // Deployed to a custom domain, not workers.dev. The domain itself is passed
+  // as `--domain` at deploy time so it differs per environment; setting this
+  // false is what stops wrangler demanding a workers.dev subdomain.
+  // The dashboard. Its hostname is what DASHBOARD_ORIGIN must match on the API.
+  "workers_dev": false,
   "assets": {
     "directory": ".open-next/assets",
     "binding": "ASSETS"
