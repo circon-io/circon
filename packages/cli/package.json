@@ -3,6 +3,13 @@
   "version": "0.2.0",
   "description": "Autonomous AI development runner: converge the machine, run the agent loop, report on it",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/circon-io/circon.git",
+    "directory": "packages/cli"
+  },
+  "homepage": "https://github.com/circon-io/circon#readme",
+  "bugs": "https://github.com/circon-io/circon/issues",
   "type": "module",
   "bin": {
     "circon": "./dist/index.js"
