@@ -85,8 +85,11 @@ async function machineHealth(): Promise<string[]> {
     lines.push(`- Disk: ${dfLine[3]} free of ${dfLine[1]} (${dfLine[4]} used)`)
   }
 
+  // `$` without the m flag will not match before the trailing newline, which
+  // silently dropped this line entirely. Linux says "load average", macOS says
+  // "load averages" — accept both.
   const uptime = await run('uptime', [])
-  const load = uptime.stdout.match(/load averages?:\s*(.+)$/)
+  const load = uptime.stdout.match(/load averages?:\s*(.+)$/m)
   if (load?.[1]) lines.push(`- Load: ${load[1].trim()}`)
 
   if (await which('nvidia-smi')) {

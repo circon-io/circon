@@ -8,6 +8,7 @@
     "outDir": "dist",
     "allowImportingTsExtensions": true,
     "rewriteRelativeImportExtensions": true,
+    "erasableSyntaxOnly": true,
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "noImplicitOverride": true,

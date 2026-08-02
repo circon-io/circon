@@ -2,7 +2,14 @@ import { run } from '../core/exec.ts'
 
 /** Thin, typed wrapper. Every call is scoped to an explicit repo directory. */
 export class Repo {
-  constructor(private readonly cwd: string) {}
+  // Written out rather than a constructor parameter property: those are not
+  // erasable syntax, so Node's type stripping rejects them and the CLI cannot
+  // be run from source. `erasableSyntaxOnly` in tsconfig keeps it that way.
+  readonly cwd: string
+
+  constructor(cwd: string) {
+    this.cwd = cwd
+  }
 
   private git(...args: string[]) {
     return run('git', args, { cwd: this.cwd })

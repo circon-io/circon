@@ -68,10 +68,15 @@ export async function initCommand(nameArg?: string): Promise<number> {
   writeFileSync(join(target, 'progress.txt'), '')
 
   // The conventions clone is the source of truth for the PRD template, so a
-  // convention change reaches new projects without a CLI release.
+  // convention change reaches new projects without a CLI release. Say so loudly
+  // when it is absent — a project with no PRD gives the loop nothing to work
+  // from, and the failure would otherwise only surface at `circon run`.
   const conventionPrd = join(paths.conventions, 'templates', 'PRD.md')
   if (existsSync(conventionPrd)) {
     cpSync(conventionPrd, join(target, 'PRD.md'))
+  } else {
+    ui.warn('No PRD template found — the conventions repo is not cloned.')
+    ui.dim("  Run 'circon setup --only conventions', then write PRD.md by hand.")
   }
 
   ui.ok(`Created ${target}`)
