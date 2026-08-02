@@ -25,7 +25,7 @@ premise — the control plane would be a window onto nothing.
 - [x] Add the verify pass and any cloud build to the same ledger
 - [x] **Hard stop** when a cap is hit, mid-run, not a warning after the fact
 - [x] Spend ledger at `~/.local/state/circon/spend.json`, rolling per day
-- [ ] Cost per run in the daily report and in the PR body
+- [x] Cost per run in the daily report and in the PR body
 - [x] Refuse to start a run that would exceed the daily cap
 
 Correctness has a circuit breaker; spend has nothing. `verifyBudgetUsd` caps one

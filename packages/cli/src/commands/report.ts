@@ -3,6 +3,8 @@ import { join } from 'node:path'
 import { run, which } from '../core/exec.ts'
 import { ui } from '../core/ui.ts'
 import { paths } from '../core/paths.ts'
+import { readTasks } from '../agent/progress.ts'
+import { spentToday, usd } from '../agent/spend.ts'
 
 /**
  * The daily digest. Reports what was *built*, not just how many commits landed —
@@ -55,8 +57,9 @@ async function activityFor(dir: string, since: string): Promise<ProjectActivity 
   const subjects = log.ok ? log.stdout.split('\n').filter(Boolean) : []
   if (subjects.length === 0) return null
 
-  const prdPath = join(dir, 'PRD.md')
-  const prd = existsSync(prdPath) ? readFileSync(prdPath, 'utf8') : ''
+  // Completion lives in .circon/progress.json now, not in PRD checkboxes —
+  // the agent no longer ticks them, so counting them would always read zero.
+  const tasks = readTasks(dir)
   const progressPath = join(dir, 'progress.txt')
   const progress = existsSync(progressPath) ? readFileSync(progressPath, 'utf8') : ''
   const notes = progress.split('\n').filter((l) => l.trim() && !l.includes('ALL_TASKS_COMPLETE'))
@@ -68,8 +71,8 @@ async function activityFor(dir: string, since: string): Promise<ProjectActivity 
       /^(feat|fix|chore|refactor|test|docs|build|ci)(\(.+\))?!?:/.test(s),
     ).length,
     subjects: subjects.slice(0, 6),
-    prdDone: (prd.match(/^- \[[xX]\]/gm) ?? []).length,
-    prdOpen: (prd.match(/^- \[ \]/gm) ?? []).length,
+    prdDone: tasks.filter((t) => t.done).length,
+    prdOpen: tasks.filter((t) => !t.done).length,
     lastNote: notes.at(-1)?.slice(0, 180) ?? null,
     complete: progress.includes('ALL_TASKS_COMPLETE'),
   }
@@ -139,6 +142,9 @@ export async function reportCommand(opts: { stdout?: boolean } = {}): Promise<nu
   } else {
     lines.push('😴 No repository activity in the last 24h.')
   }
+
+  const today = spentToday()
+  if (today > 0) lines.push('', `💷 Spent today: ${usd(today)}`)
 
   lines.push('', '🖥️ Machine', ...(await machineHealth()))
   const report = lines.join('\n')
