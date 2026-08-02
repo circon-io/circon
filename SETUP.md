@@ -16,7 +16,7 @@ the dashboard to provide one.
 
 | Secret | Where to get it |
 |---|---|
-| `CLOUDFLARE_API_TOKEN` | Cloudflare → My Profile → API Tokens → Create. Permissions: **Account · Workers Scripts · Edit**, **Account · D1 · Edit**, **Account · Workers KV Storage · Edit**. Scope it to the one account — never a Global API Key. |
+| `CLOUDFLARE_API_TOKEN` | Cloudflare → My Profile → API Tokens → **Create Custom Token**. Three permissions only — see [Cloudflare API token](#cloudflare-api-token) below. Never a Global API Key. |
 | `CLERK_JWKS_URL` | `https://<your-clerk-domain>/.well-known/jwks.json` — Clerk → Configure → API Keys → Show JWT public key |
 | `CLERK_SECRET_KEY` | Clerk → API Keys → Secret key (`sk_live_…`) |
 | `RUNNER_SECRET_PEPPER` | Generate yourself: `openssl rand -hex 32`. Peppers runner-token hashes; **changing it invalidates every enrolled runner**, so treat it as permanent. |
@@ -119,6 +119,27 @@ other, both surface as a bare `E404` on publish rather than an auth error.
 Nothing to create by hand. The deploy workflow creates the D1 database if it is
 absent and adopts it if it exists; Durable Objects, assets and bindings are all
 declared in `wrangler.jsonc`.
+
+### Cloudflare API token
+
+Use **Create Custom Token**, not the "Edit Cloudflare Workers" template — that
+template grants KV, R2 and Workers Routes on every zone, none of which this
+project touches.
+
+| Permission | Level | Why |
+|---|---|---|
+| **Workers Scripts** · Edit | Account | `wrangler deploy`, `wrangler secret put`, and the static assets upload. Durable Objects are part of the script, so they need no separate grant. |
+| **D1** · Edit | Account | `d1 list`, `d1 create`, `d1 migrations apply`. Edit implies read. |
+| **Account Settings** · Read | Account | Wrangler validates the account before deploying. |
+
+**Account Resources** → include only the one account.
+**Zone Resources** → none. Both Workers publish to `*.workers.dev`; a custom
+domain would add **Workers Routes · Edit** on that zone alone.
+
+Deliberately absent: **KV**, **R2** and **Queues** — nothing declares a binding
+for any of them, so granting them widens the blast radius for nothing. If a
+deploy ever fails with a permissions error, add the one permission it names
+rather than reaching for the template.
 
 ---
 
