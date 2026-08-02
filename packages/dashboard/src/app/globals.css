@@ -1,0 +1,8 @@
+@import 'tailwindcss';
+/* HeroUI 3 ships a stylesheet rather than a Tailwind plugin — `./plugin` does
+   not exist in its exports map, which is the v2 arrangement. */
+@import '@heroui/react/styles';
+
+:root {
+  color-scheme: light dark;
+}

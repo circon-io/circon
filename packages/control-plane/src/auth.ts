@@ -50,10 +50,21 @@ export function newToken(bytes = 32): string {
   return [...raw].map((b) => b.toString(16).padStart(2, '0')).join('')
 }
 
+/**
+ * A browser cannot set an Authorization header on a WebSocket handshake, so the
+ * dashboard passes the session token as a query parameter for `/watch` only.
+ * Everything else uses the header.
+ */
 function bearer(request: Request): string | null {
   const header = request.headers.get('authorization') ?? ''
   const match = header.match(/^Bearer\s+(.+)$/i)
-  return match?.[1]?.trim() ?? null
+  if (match?.[1]) return match[1].trim()
+
+  if (request.headers.get('Upgrade') === 'websocket') {
+    const query = new URL(request.url).searchParams.get('token')
+    if (query) return query.trim()
+  }
+  return null
 }
 
 /** A human, via a Clerk session token. Null when absent or invalid. */

@@ -1,0 +1,21 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "circon-dashboard",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2026-01-01",
+  // Required by OpenNext: Next's server code expects Node built-ins.
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "observability": { "enabled": true },
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  "vars": {
+    // The control-plane Worker. Same zone in production, so no CORS.
+    "NEXT_PUBLIC_CONTROL_PLANE_URL": "https://circon-control-plane.workers.dev"
+  }
+  // Secrets, set by the deploy workflow:
+  //   CLERK_SECRET_KEY
+  // Variables set at deploy time:
+  //   NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
+}

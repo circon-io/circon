@@ -7,10 +7,6 @@
 
   "observability": { "enabled": true },
 
-  // The dashboard is served from the same Worker, so there is one deploy and
-  // one origin — no CORS, no second domain to secure.
-  "assets": { "directory": "./public", "binding": "ASSETS" },
-
   "durable_objects": {
     "bindings": [{ "name": "RUNNER", "class_name": "RunnerDO" }]
   },
@@ -36,7 +32,10 @@
 
   "vars": {
     "CLERK_ISSUER": "",
-    "ENROLL_TOKEN_TTL_MINUTES": "30"
+    "ENROLL_TOKEN_TTL_MINUTES": "30",
+    // The dashboard Worker's origin. Only this origin may call the API from a
+    // browser; runners use bearer tokens and are unaffected by CORS.
+    "DASHBOARD_ORIGIN": ""
   }
 
   // Secrets, set by the deploy workflow with `wrangler secret put`:

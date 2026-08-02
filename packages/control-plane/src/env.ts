@@ -3,11 +3,11 @@ import type { RunnerDO } from './runner-do.ts'
 export interface Env {
   DB: D1Database
   RUNNER: DurableObjectNamespace<RunnerDO>
-  ASSETS: Fetcher
 
   // vars
   CLERK_ISSUER?: string
   ENROLL_TOKEN_TTL_MINUTES?: string
+  DASHBOARD_ORIGIN?: string
 
   // secrets, set by the deploy workflow
   CLERK_JWKS_URL?: string

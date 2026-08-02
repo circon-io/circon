@@ -19,8 +19,39 @@ function runnerStub(env: Env, runnerId: string) {
   return env.RUNNER.get(env.RUNNER.idFromName(runnerId))
 }
 
+/**
+ * The dashboard is a separate Worker, so browser calls are cross-origin. Only
+ * the configured dashboard origin is allowed; runners authenticate with bearer
+ * tokens and are not subject to CORS at all.
+ */
+function corsHeaders(env: Env, request: Request): Record<string, string> {
+  const origin = request.headers.get('origin')
+  if (!origin || !env.DASHBOARD_ORIGIN || origin !== env.DASHBOARD_ORIGIN) return {}
+  return {
+    'access-control-allow-origin': origin,
+    'access-control-allow-methods': 'GET,POST,DELETE,OPTIONS',
+    'access-control-allow-headers': 'authorization,content-type',
+    'access-control-max-age': '86400',
+    vary: 'Origin',
+  }
+}
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    const cors = corsHeaders(env, request)
+    if (request.method === 'OPTIONS') {
+      return new Response(null, { status: 204, headers: cors })
+    }
+    const response = await handle(request, env, ctx)
+    // A 101 upgrade must be returned untouched or the socket never opens.
+    if (response.status === 101) return response
+    for (const [key, value] of Object.entries(cors)) response.headers.set(key, value)
+    return response
+  },
+}
+
+async function handle(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  {
     const url = new URL(request.url)
     const path = url.pathname
 
@@ -110,8 +141,7 @@ export default {
         return fail('not_found', `No route for ${request.method} ${path}`, 404)
       }
 
-      // ---- dashboard assets -------------------------------------------------
-      return env.ASSETS.fetch(request)
+      return fail('not_found', 'This Worker serves the API only.', 404)
     } catch (error) {
       // Never leak an internal message to a client.
       console.error('unhandled', error)
@@ -119,7 +149,7 @@ export default {
     } finally {
       void ctx
     }
-  },
+  }
 }
 
 // ---------------------------------------------------------------------------
