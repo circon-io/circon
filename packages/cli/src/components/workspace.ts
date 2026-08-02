@@ -5,7 +5,7 @@ import { paths } from '../core/paths.ts'
 import { readConfig } from '../core/config.ts'
 import { type Component, ok, missing } from './types.ts'
 
-export const DEFAULT_CONVENTIONS_REPO = 'https://github.com/circon-dev/circon-conventions.git'
+export const DEFAULT_CONVENTIONS_REPO = 'https://github.com/circon-io/circon-conventions.git'
 
 export const workspaceComponent: Component = {
   id: 'workspace',
