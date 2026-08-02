@@ -6,6 +6,10 @@ import { setupCommand } from './commands/setup.ts'
 
 const USAGE = `circon — autonomous AI development runner
 
+Fleet
+  circon enroll --url <u> --token <t>   join a control plane
+  circon agent                     run as a daemon: heartbeat, accept jobs
+
 Machine
   circon doctor                    what is installed, missing, stale or foreign
   circon setup [--upgrade]         install only what is missing (idempotent)
@@ -83,6 +87,16 @@ async function main(argv: string[]): Promise<number> {
     case 'init': {
       const { initCommand } = await import('./commands/init.ts')
       return initCommand(rest[0])
+    }
+
+    case 'enroll': {
+      const { enrollCommand } = await import('./commands/enroll.ts')
+      return enrollCommand(rest)
+    }
+
+    case 'agent': {
+      const { agentCommand } = await import('./commands/agent.ts')
+      return agentCommand()
     }
 
     case 'job': {

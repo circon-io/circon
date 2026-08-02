@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>circon — runners</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #fff; --fg: #111; --muted: #666; --line: #e3e3e3; --card: #fafafa;
+    --ok: #1a7f37; --busy: #0969da; --off: #8b949e; --warn: #9a6700;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#0d1117; --fg:#e6edf3; --muted:#8b949e; --line:#30363d; --card:#161b22; }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 2rem 1.25rem; background: var(--bg); color: var(--fg);
+    font: 15px/1.55 ui-sans-serif, system-ui, -apple-system, sans-serif;
+  }
+  main { max-width: 60rem; margin: 0 auto; }
+  h1 { font-size: 1.35rem; margin: 0 0 .25rem; }
+  .sub { color: var(--muted); margin: 0 0 2rem; }
+  .runner {
+    border: 1px solid var(--line); border-radius: 10px; background: var(--card);
+    padding: 1rem 1.15rem; margin-bottom: .85rem;
+  }
+  .row { display: flex; align-items: baseline; gap: .6rem; flex-wrap: wrap; }
+  .name { font-weight: 600; }
+  .dot { width: .55rem; height: .55rem; border-radius: 50%; display: inline-block; }
+  .idle .dot { background: var(--ok); }
+  .running .dot { background: var(--busy); }
+  .offline .dot { background: var(--off); }
+  .meta { color: var(--muted); font-size: .875rem; }
+  pre {
+    background: var(--bg); border: 1px solid var(--line); border-radius: 6px;
+    padding: .7rem; margin: .75rem 0 0; max-height: 15rem; overflow: auto;
+    font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap;
+  }
+  button {
+    font: inherit; padding: .3rem .7rem; border: 1px solid var(--line);
+    border-radius: 6px; background: var(--bg); color: var(--fg); cursor: pointer;
+  }
+  button:hover { border-color: var(--muted); }
+  .empty { color: var(--muted); border: 1px dashed var(--line); border-radius: 10px; padding: 2rem; text-align: center; }
+  code { background: var(--card); padding: .1rem .3rem; border-radius: 4px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>circon</h1>
+  <p class="sub" id="summary">Loading…</p>
+  <div id="runners"></div>
+</main>
+
+<script type="module">
+/**
+ * Deliberately small and dependency-free: it is served from the same Worker as
+ * the API, so there is one origin, no CORS and no build step. When this needs
+ * to grow it becomes the Next.js app the stack already specifies.
+ */
+
+// A Clerk session token, injected by whatever hosts this page. Kept in one
+// place so swapping in the real Clerk SDK touches nothing else.
+const token = () => localStorage.getItem('circon_token') ?? ''
+
+async function api(path, init = {}) {
+  const res = await fetch(path, {
+    ...init,
+    headers: { ...(init.headers ?? {}), authorization: `Bearer ${token()}` },
+  })
+  if (res.status === 401) throw new Error('Not signed in')
+  const body = await res.json()
+  if (!body.ok) throw new Error(body.error?.message ?? 'Request failed')
+  return body.data
+}
+
+const ago = (iso) => {
+  if (!iso) return 'never'
+  const secs = Math.round((Date.now() - Date.parse(iso)) / 1000)
+  if (secs < 60) return `${secs}s ago`
+  if (secs < 3600) return `${Math.round(secs / 60)}m ago`
+  return `${Math.round(secs / 3600)}h ago`
+}
+
+const money = (n) => `$${Number(n ?? 0).toFixed(2)}`
+
+function render(runners, spend) {
+  const host = document.getElementById('runners')
+  document.getElementById('summary').textContent =
+    `${runners.length} runner${runners.length === 1 ? '' : 's'} · ${money(spend)} in the last 24h`
+
+  if (runners.length === 0) {
+    host.innerHTML = `<div class="empty">
+      No runners yet. Create an enrolment token, then run
+      <code>circon enroll --token &lt;token&gt;</code> on the machine.
+    </div>`
+    return
+  }
+
+  host.innerHTML = runners.map((r) => {
+    const s = r.state ?? { status: 'offline' }
+    const detail = s.status === 'running'
+      ? `${s.project ?? '—'} · iteration ${s.iteration ?? '?'} · ${money(s.costUsd)}`
+      : `last seen ${ago(r.last_seen_at ?? s.lastSeenAt)}`
+    return `<div class="runner ${s.status}" data-id="${r.id}">
+      <div class="row">
+        <span class="dot"></span>
+        <span class="name">${r.name}</span>
+        <span class="meta">${s.status}</span>
+        <span class="meta">· ${detail}</span>
+        <span style="margin-left:auto"></span>
+        ${s.status === 'running' ? `<button data-stop="${r.id}">Stop</button>` : ''}
+        <button data-logs="${r.id}">Logs</button>
+      </div>
+      <pre data-log-for="${r.id}" hidden></pre>
+    </div>`
+  }).join('')
+}
+
+document.addEventListener('click', async (event) => {
+  const stop = event.target.closest('[data-stop]')
+  if (stop) {
+    await api(`/api/runners/${stop.dataset.stop}/command`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ type: 'command', command: 'stop' }),
+    })
+    stop.textContent = 'Stopping…'
+    return
+  }
+
+  const logs = event.target.closest('[data-logs]')
+  if (logs) {
+    const pre = document.querySelector(`[data-log-for="${logs.dataset.logs}"]`)
+    if (!pre.hidden) { pre.hidden = true; return }
+    const res = await fetch(`/api/runners/${logs.dataset.logs}/logs`, {
+      headers: { authorization: `Bearer ${token()}` },
+    })
+    const body = await res.json()
+    pre.textContent = (body.lines ?? []).join('\n') || 'No output yet.'
+    pre.hidden = false
+    pre.scrollTop = pre.scrollHeight
+  }
+})
+
+async function refresh() {
+  try {
+    const [{ runners }, { spentLast24h }] = await Promise.all([
+      api('/api/runners'),
+      api('/api/runs?limit=1'),
+    ])
+    render(runners, spentLast24h)
+  } catch (error) {
+    document.getElementById('summary').textContent = error.message
+  }
+}
+
+refresh()
+// Polling, not a socket, for the list itself — the per-runner socket carries
+// live logs, and a fleet list changing every few seconds is fast enough.
+setInterval(refresh, 5000)
+</script>
+</body>
+</html>

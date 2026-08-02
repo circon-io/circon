@@ -1,0 +1,79 @@
+name: Deploy control plane
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'packages/control-plane/**'
+      - '.github/workflows/deploy-control-plane.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-control-plane
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    # Required reviewers on this environment make the deploy an approval gate.
+    environment: production
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @circon/control-plane typecheck
+
+      # Everything wrangler CAN declare lives in wrangler.jsonc: the Durable
+      # Object and its migration, the assets binding, observability.
+      #
+      # A D1 database cannot be declared — `database_id` must exist before
+      # deploy — so it is created here, idempotently, and its id written into
+      # the config. Adopting an existing database is the normal path; creation
+      # only happens on a fresh account.
+      - name: Provision resources wrangler cannot declare
+        working-directory: packages/control-plane
+        run: node scripts/provision.mjs --write
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Apply D1 migrations
+        working-directory: packages/control-plane
+        run: npx wrangler d1 migrations apply circon --remote
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+
+      # Secrets are pushed rather than committed. `secret put` is idempotent, so
+      # rotating a value in GitHub and re-running is the whole rotation story.
+      - name: Sync secrets
+        working-directory: packages/control-plane
+        run: |
+          set -euo pipefail
+          put() {
+            if [ -n "${2:-}" ]; then
+              printf '%s' "$2" | npx wrangler secret put "$1"
+              echo "  set $1"
+            else
+              echo "  skipped $1 (not provided)"
+            fi
+          }
+          put CLERK_JWKS_URL       "${{ secrets.CLERK_JWKS_URL }}"
+          put RUNNER_SECRET_PEPPER "${{ secrets.RUNNER_SECRET_PEPPER }}"
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Deploy
+        working-directory: packages/control-plane
+        run: npx wrangler deploy --var CLERK_ISSUER:"${{ vars.CLERK_ISSUER }}"
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}

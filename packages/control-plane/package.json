@@ -1,0 +1,23 @@
+{
+  "name": "@circon/control-plane",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "provision": "node scripts/provision.mjs",
+    "migrate:local": "wrangler d1 migrations apply circon --local",
+    "migrate": "wrangler d1 migrations apply circon --remote",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test 'src/**/*.test.ts'"
+  },
+  "dependencies": {
+    "jose": "^5.9.6"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250109.0",
+    "typescript": "^5.9.0",
+    "wrangler": "^4.0.0"
+  }
+}

@@ -1,0 +1,45 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "circon-control-plane",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-01-01",
+  "compatibility_flags": ["nodejs_compat"],
+
+  "observability": { "enabled": true },
+
+  // The dashboard is served from the same Worker, so there is one deploy and
+  // one origin — no CORS, no second domain to secure.
+  "assets": { "directory": "./public", "binding": "ASSETS" },
+
+  "durable_objects": {
+    "bindings": [{ "name": "RUNNER", "class_name": "RunnerDO" }]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      // SQLite-backed so the DO can keep its own log buffer cheaply and
+      // hibernate between heartbeats.
+      "new_sqlite_classes": ["RunnerDO"]
+    }
+  ],
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "circon",
+      // Injected by scripts/provision.mjs — a D1 database cannot be declared
+      // into existence, so the deploy workflow creates it and writes the id.
+      "database_id": "PLACEHOLDER_D1_ID",
+      "migrations_dir": "migrations"
+    }
+  ],
+
+  "vars": {
+    "CLERK_ISSUER": "",
+    "ENROLL_TOKEN_TTL_MINUTES": "30"
+  }
+
+  // Secrets, set by the deploy workflow with `wrangler secret put`:
+  //   CLERK_JWKS_URL          verify dashboard sessions
+  //   RUNNER_SECRET_PEPPER    peppers runner-token hashes
+}
