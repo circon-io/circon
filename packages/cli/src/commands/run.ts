@@ -42,8 +42,10 @@ export async function runCommand(maxLoops = 20): Promise<number> {
   }
 
   // Design before code — the PRD template ships these as marker comments.
+  // Both spellings are accepted so a PRD written before the rename still gates.
   const prdPath = join(cwd, 'PRD.md')
-  if (existsSync(prdPath) && readFileSync(prdPath, 'utf8').includes('SOLYD-UNFILLED')) {
+  const prdText = existsSync(prdPath) ? readFileSync(prdPath, 'utf8') : ''
+  if (/(CIRCON|SOLYD)-UNFILLED/.test(prdText)) {
     ui.error('PRD.md still has unfilled design sections.')
     ui.info('Write the Design Principles and User Flows, then delete those comment blocks.')
     ui.dim('Coding before they exist produces an app whose screens each invent their own design.')
@@ -234,9 +236,9 @@ export async function runCommand(maxLoops = 20): Promise<number> {
       ].join('\n'))
       ui.ok('Stopped cleanly.')
     } else {
-      const open = existsSync(prdPath)
-        ? (readFileSync(prdPath, 'utf8').match(/^- \[ \]/gm) ?? []).length
-        : 0
+      const open = (
+        (existsSync(prdPath) ? readFileSync(prdPath, 'utf8') : prdText).match(/^- \[ \]/gm) ?? []
+      ).length
       await notify([
         `⏸️ circon PAUSED: ${project}`,
         `Hit the ${maxLoops} iteration limit — ${open} tasks still open.`,
