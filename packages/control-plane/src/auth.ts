@@ -7,7 +7,7 @@ import type { Env } from './env.ts'
  * Humans arrive with a Clerk session JWT, verified against Clerk's JWKS —
  * signature checking is not something to hand-roll, so it uses `jose`.
  *
- * Runners arrive with a bearer token issued at enrolment. Only its hash is
+ * Runners arrive with a bearer token issued at enrollment. Only its hash is
  * stored, peppered with a server-side secret, so a database dump yields nothing
  * usable. Comparison is constant-time.
  */
@@ -81,7 +81,7 @@ export async function authenticateHuman(request: Request, env: Env): Promise<Pri
     const sub = typeof payload.sub === 'string' ? payload.sub : null
     if (!sub) return null
 
-    // Clerk puts the active organisation in `org_id`; fall back to the user so
+    // Clerk puts the active organization in `org_id`; fall back to the user so
     // a personal account still has a stable tenant key.
     const org = typeof payload['org_id'] === 'string' ? payload['org_id'] : sub
     const email = typeof payload['email'] === 'string' ? payload['email'] : undefined
@@ -91,7 +91,7 @@ export async function authenticateHuman(request: Request, env: Env): Promise<Pri
   }
 }
 
-/** A runner, via its enrolment-issued bearer token. */
+/** A runner, via its enrollment-issued bearer token. */
 export async function authenticateRunner(request: Request, env: Env): Promise<Principal | null> {
   const token = bearer(request)
   if (!token) return null

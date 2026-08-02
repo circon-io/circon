@@ -8,7 +8,7 @@ import { paths, projectPaths } from '../core/paths.ts'
 
 /**
  * Scaffold a project: one directory under ~/Projects, a pnpm monorepo holding
- * its own clients and services. Nothing is categorised above the project, so a
+ * its own clients and services. Nothing is categorized above the project, so a
  * repo never has to live in two trees.
  */
 

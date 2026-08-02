@@ -12,7 +12,7 @@ import { usd } from './spend.ts'
  * The gate asserts on the accessibility tree because pixels are the wrong thing
  * to fail a build on. A reviewer deciding whether to ship wants to *see* it, so
  * screenshots are captured once, after the gate is green, purely as a review
- * artefact — never as an assertion.
+ * artifact — never as an assertion.
  */
 
 export interface RunSummary {

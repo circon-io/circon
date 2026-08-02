@@ -4,7 +4,7 @@ import { type ApiResult, err, ok, object, str, ValidationError } from '@app/shar
  * The API worker.
  *
  * Every route validates its input before any logic runs, returns one error
- * shape, and uses the status code that reflects reality. Authorisation happens
+ * shape, and uses the status code that reflects reality. Authorization happens
  * here on the server — a hidden button is not access control.
  */
 

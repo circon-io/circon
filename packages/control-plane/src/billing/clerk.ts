@@ -2,7 +2,7 @@ import type { Env } from '../env.ts'
 import { DEFAULT_PLAN, isPlanId, type PlanId } from './plans.ts'
 
 /**
- * Clerk organisation metadata is where the Stripe relationship is recorded.
+ * Clerk organization metadata is where the Stripe relationship is recorded.
  *
  * Stripe owns *whether* someone is paying; Clerk owns *who they are*. Tagging
  * the org with the resulting plan means every request already carries the
@@ -68,11 +68,11 @@ function readTag(metadata: unknown): BillingTag {
  * An org's billing tag. Falls back to the free plan on any failure — a Clerk
  * outage must not hand out unlimited runners, and must not lock out a paying
  * customer's existing ones either, which is why enforcement only ever blocks
- * *new* enrolments.
+ * *new* enrollments.
  */
 export async function readBillingTag(env: Env, orgId: string): Promise<BillingTag> {
   try {
-    // A personal account has no organisation; its id is the user id.
+    // A personal account has no organization; its id is the user id.
     const isOrg = orgId.startsWith('org_')
     const res = await clerk(env, `${isOrg ? '/organizations' : '/users'}/${orgId}`)
     if (!res.ok) return { plan: DEFAULT_PLAN }

@@ -108,6 +108,11 @@ commit, and every machine picks it up on the next `circon update`.
   with a pnpm built-in — `deploy`, `publish`, `link`, `prune`, `update`, `add`,
   `setup`, `list` and others. `pnpm deploy` runs pnpm's own deploy command and
   fails with `ERR_PNPM_NOTHING_TO_DEPLOY`; the script is never reached.
+- **American English everywhere** — identifiers, comments, docs and UI strings.
+  `enrollment` not `enrolment`, `organization` not `organisation`, `behavior`
+  not `behaviour`, `-ize` not `-ise`. The repo previously had both spellings of
+  `enroll` in *identifiers* (`enroll_tokens` beside `Enrolment`), which made the
+  concept ungreppable.
 - Commit messages: `feat: <short lowercase summary>`, no body.
 - Credentials go to `~/.config/circon/*.env` at mode 0600, never `~/.bashrc`.
 

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { UserButton } from '@clerk/nextjs'
 import { Chip, Spinner } from '@heroui/react'
 import { RunnerCard } from '@/components/runner-card'
-import { EnrolRunner } from '@/components/enrol-runner'
+import { EnrollRunner } from '@/components/enroll-runner'
 import { QueueJob } from '@/components/queue-job'
 import { RunsTable } from '@/components/runs-table'
 import { BillingCard } from '@/components/billing-card'
@@ -76,7 +76,7 @@ export default function DashboardPage() {
           <Spinner size="sm" aria-label="Loading runners" />
         ) : runners.length === 0 ? (
           <p className="rounded-medium border border-dashed border-default-300 p-8 text-center text-default-500">
-            No runners yet. Create an enrolment token below, then run that command on the machine.
+            No runners yet. Create an enrollment token below, then run that command on the machine.
           </p>
         ) : (
           runners.map((runner) => (
@@ -88,7 +88,7 @@ export default function DashboardPage() {
       <BillingCard />
 
       <div className="grid gap-4 md:grid-cols-2">
-        <EnrolRunner onEnrolled={() => void refresh()} />
+        <EnrollRunner onEnrolled={() => void refresh()} />
         <QueueJob onQueued={() => void refresh()} />
       </div>
 

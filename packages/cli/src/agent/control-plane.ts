@@ -5,13 +5,13 @@ import { paths } from '../core/paths.ts'
 /**
  * The runner's half of the control plane.
  *
- * Everything here fails soft. A runner works standalone today, and centralising
+ * Everything here fails soft. A runner works standalone today, and centralizing
  * configuration must not turn a working machine into one that depends on a
  * service being reachable — so an unreachable control plane always falls back
  * to the cached copy rather than refusing to run.
  */
 
-export interface Enrolment {
+export interface Enrollment {
   url: string
   runnerId: string
   token: string
@@ -29,40 +29,40 @@ export interface RemoteConfig {
   iosRunnerMode?: 'none' | 'mac' | 'device' | 'vm'
 }
 
-const ENROLMENT = () => join(paths.config, 'enrolment.json')
+const ENROLLMENT = () => join(paths.config, 'enrollment.json')
 const CONFIG_CACHE = () => join(paths.state, 'remote-config.json')
 
-export function readEnrolment(): Enrolment | null {
-  if (!existsSync(ENROLMENT())) return null
+export function readEnrollment(): Enrollment | null {
+  if (!existsSync(ENROLLMENT())) return null
   try {
-    return JSON.parse(readFileSync(ENROLMENT(), 'utf8')) as Enrolment
+    return JSON.parse(readFileSync(ENROLLMENT(), 'utf8')) as Enrollment
   } catch {
     return null
   }
 }
 
-export function writeEnrolment(enrolment: Enrolment): void {
+export function writeEnrollment(enrollment: Enrollment): void {
   mkdirSync(paths.config, { recursive: true })
   // The runner credential is a long-lived secret.
-  writeFileSync(ENROLMENT(), `${JSON.stringify(enrolment, null, 2)}\n`, { mode: 0o600 })
-  chmodSync(ENROLMENT(), 0o600)
+  writeFileSync(ENROLLMENT(), `${JSON.stringify(enrollment, null, 2)}\n`, { mode: 0o600 })
+  chmodSync(ENROLLMENT(), 0o600)
 }
 
 export function isEnrolled(): boolean {
-  return readEnrolment() !== null
+  return readEnrollment() !== null
 }
 
 async function request(
-  enrolment: Enrolment,
+  enrollment: Enrollment,
   path: string,
   init: RequestInit = {},
 ): Promise<unknown | null> {
   try {
-    const res = await fetch(new URL(path, enrolment.url), {
+    const res = await fetch(new URL(path, enrollment.url), {
       ...init,
       headers: {
         ...(init.headers ?? {}),
-        authorization: `Bearer ${enrolment.token}`,
+        authorization: `Bearer ${enrollment.token}`,
         'content-type': 'application/json',
       },
       signal: AbortSignal.timeout(15_000),
@@ -76,13 +76,13 @@ async function request(
   }
 }
 
-/** Exchange a one-time enrolment token for a runner credential. */
+/** Exchange a one-time enrollment token for a runner credential. */
 export async function enroll(
   url: string,
   token: string,
   name: string,
   cliVersion: string,
-): Promise<Enrolment | { error: string }> {
+): Promise<Enrollment | { error: string }> {
   try {
     const res = await fetch(new URL('/api/enroll', url), {
       method: 'POST',
@@ -96,7 +96,7 @@ export async function enroll(
       error?: { message?: string }
     }
     if (!res.ok || !body.ok || !body.data) {
-      return { error: body.error?.message ?? `enrolment refused (HTTP ${res.status})` }
+      return { error: body.error?.message ?? `enrollment refused (HTTP ${res.status})` }
     }
     return {
       url,
@@ -119,10 +119,10 @@ export async function enroll(
  * previous settings rather than to nothing.
  */
 export async function fetchConfig(): Promise<{ config: RemoteConfig; stale: boolean }> {
-  const enrolment = readEnrolment()
-  if (!enrolment) return { config: {}, stale: false }
+  const enrollment = readEnrollment()
+  if (!enrollment) return { config: {}, stale: false }
 
-  const fresh = (await request(enrolment, '/api/runner/config')) as
+  const fresh = (await request(enrollment, '/api/runner/config')) as
     | { config?: RemoteConfig }
     | null
 
@@ -149,9 +149,9 @@ export interface QueuedJob {
 }
 
 export async function claimJob(): Promise<QueuedJob | null> {
-  const enrolment = readEnrolment()
-  if (!enrolment) return null
-  const data = (await request(enrolment, '/api/runner/claim', { method: 'POST' })) as
+  const enrollment = readEnrollment()
+  if (!enrollment) return null
+  const data = (await request(enrollment, '/api/runner/claim', { method: 'POST' })) as
     | { job?: QueuedJob | null }
     | null
   return data?.job ?? null
@@ -171,17 +171,17 @@ export interface RunRecord {
 }
 
 export async function reportRun(record: RunRecord): Promise<boolean> {
-  const enrolment = readEnrolment()
-  if (!enrolment) return false
-  const data = await request(enrolment, '/api/runner/run', {
+  const enrollment = readEnrollment()
+  if (!enrollment) return false
+  const data = await request(enrollment, '/api/runner/run', {
     method: 'POST',
     body: JSON.stringify(record),
   })
   return data !== null
 }
 
-export function socketUrl(enrolment: Enrolment): string {
-  const url = new URL('/api/runner/socket', enrolment.url)
+export function socketUrl(enrollment: Enrollment): string {
+  const url = new URL('/api/runner/socket', enrollment.url)
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
   return url.toString()
 }

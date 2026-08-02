@@ -2,7 +2,7 @@
 
 This repository is licensed per package, because the parts have different jobs.
 
-| Package | Licence | Why |
+| Package | License | Why |
 |---|---|---|
 | `packages/cli` (`@circon/cli`) | **MIT** | It runs on your machine with your API keys, your Cloudflare token and access to your repositories. Software that does that has to be readable, and it must keep working with no service behind it. |
 | `packages/control-plane` | **FSL-1.1-ALv2** | Converts to Apache 2.0 after two years. |
@@ -28,7 +28,7 @@ locked away permanently.
 
 The runner holds credentials and executes autonomously on someone's hardware.
 Asking people to trust that without being able to read it, fork it, or run it
-independently of any service is a worse trade than anything the licence would
+independently of any service is a worse trade than anything the license would
 protect. It is also the part with no hosting business to defend — there is
 nothing to compete with in a CLI that runs on your own machine.
 

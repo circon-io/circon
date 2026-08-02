@@ -7,7 +7,7 @@ import { planFor, type FeatureId, type Plan, type PlanLimits } from './plans.ts'
  *
  * Enforcement lives here, on the server, and never in the CLI. A limit shipped
  * to someone's machine in open-source TypeScript is bypassed in a minute; a
- * limit checked at enrolment is not.
+ * limit checked at enrollment is not.
  */
 
 export interface Entitlement {
@@ -51,13 +51,13 @@ export async function countRunners(env: Env, orgId: string): Promise<number> {
 }
 
 /**
- * The headline check, run at enrolment.
+ * The headline check, run at enrollment.
  *
  * Only *new* runners are blocked. An org that downgrades keeps the runners it
  * already has working — silently killing machines someone depends on is a
  * worse outcome than briefly exceeding a limit, and they cannot add more.
  */
-export async function canEnrolRunner(env: Env, orgId: string): Promise<Decision> {
+export async function canEnrollRunner(env: Env, orgId: string): Promise<Decision> {
   const { plan, limits } = await entitlementFor(env, orgId)
   const used = await countRunners(env, orgId)
 

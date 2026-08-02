@@ -1,6 +1,6 @@
 import { hostname } from 'node:os'
 import { ui } from '../core/ui.ts'
-import { readEnrolment, claimJob, socketUrl, fetchConfig } from '../agent/control-plane.ts'
+import { readEnrollment, claimJob, socketUrl, fetchConfig } from '../agent/control-plane.ts'
 import { readLock, requestStop } from '../agent/lock.ts'
 import { jobCommand } from './job.ts'
 
@@ -20,14 +20,14 @@ function backoff(attempt: number): number {
 }
 
 export async function agentCommand(): Promise<number> {
-  const enrolment = readEnrolment()
-  if (!enrolment) {
+  const enrollment = readEnrollment()
+  if (!enrollment) {
     ui.error("Not enrolled. Run 'circon enroll --url <url> --token <token>'.")
     return 1
   }
 
-  ui.ok(`circon agent — ${enrolment.name} (${enrolment.runnerId})`)
-  ui.dim(`control plane ${enrolment.url}`)
+  ui.ok(`circon agent — ${enrollment.name} (${enrollment.runnerId})`)
+  ui.dim(`control plane ${enrollment.url}`)
 
   const { config, stale } = await fetchConfig()
   if (stale) ui.warn('Using cached config — the control plane is unreachable.')
@@ -38,7 +38,7 @@ export async function agentCommand(): Promise<number> {
   let running = false
 
   const connect = () => {
-    socket = new WebSocket(socketUrl(enrolment), [])
+    socket = new WebSocket(socketUrl(enrollment), [])
 
     socket.addEventListener('open', () => {
       attempt = 0

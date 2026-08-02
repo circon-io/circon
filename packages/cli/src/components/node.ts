@@ -6,7 +6,7 @@ import { type Component, ok, missing, outdated, foreign } from './types.ts'
  * Node is the component most likely to already exist, and the one most easily
  * broken by installing over it. nvm, fnm, volta and asdf all put a shim on PATH
  * that a NodeSource apt package will silently shadow — leaving two Nodes and a
- * machine whose behaviour depends on shell startup order.
+ * machine whose behavior depends on shell startup order.
  *
  * So: if a version manager owns Node and the version is adequate, we adopt it.
  */

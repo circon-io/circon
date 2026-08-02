@@ -19,7 +19,7 @@ export const workspaceComponent: Component = {
 
   async install() {
     // One directory per project under ~/Projects; each project is a monorepo
-    // holding its own clients and services, so nothing is categorised here.
+    // holding its own clients and services, so nothing is categorized here.
     for (const dir of [paths.projects, paths.workspace, paths.config, paths.state, paths.logs]) {
       mkdirSync(dir, { recursive: true })
     }

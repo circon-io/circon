@@ -9,7 +9,7 @@ import { controlPlaneUrl, useApi } from '@/lib/api'
  * pasting it into a terminal is safe; what it returns is the long-lived
  * credential, and that never leaves the machine.
  */
-export function EnrolRunner({ onEnrolled }: { onEnrolled: () => void }) {
+export function EnrollRunner({ onEnrolled }: { onEnrolled: () => void }) {
   const api = useApi()
   const [name, setName] = useState('')
   const [busy, setBusy] = useState(false)
@@ -58,10 +58,10 @@ export function EnrolRunner({ onEnrolled }: { onEnrolled: () => void }) {
             size="sm"
             isDisabled={busy}
             onClick={() => void create()}
-            data-testid="create-enrol-token"
-            aria-label="Create enrolment token"
+            data-testid="create-enroll-token"
+            aria-label="Create enrollment token"
           >
-            {busy ? 'Creating…' : 'Create enrolment token'}
+            {busy ? 'Creating…' : 'Create enrollment token'}
           </Button>
         </div>
 
@@ -70,7 +70,7 @@ export function EnrolRunner({ onEnrolled }: { onEnrolled: () => void }) {
         {command && (
           <div className="flex flex-col gap-1">
             <p className="text-sm text-default-500">Run this on the machine:</p>
-            <Code className="overflow-x-auto" data-testid="enrol-command">
+            <Code className="overflow-x-auto" data-testid="enroll-command">
               {command}
             </Code>
             <p className="text-xs text-default-400">{expiry}</p>

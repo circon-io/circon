@@ -3,7 +3,7 @@ import {
   authenticateHuman, authenticateRunner, hashToken, newToken, unauthorized, forbidden,
 } from './auth.ts'
 import { RunnerDO } from './runner-do.ts'
-import { canEnrolRunner, canQueueJob, entitlementFor, countRunners } from './billing/entitlements.ts'
+import { canEnrollRunner, canQueueJob, entitlementFor, countRunners } from './billing/entitlements.ts'
 import { createCheckout, createPortal, handleWebhook } from './billing/stripe.ts'
 import { publicPlans, isPlanId } from './billing/plans.ts'
 
@@ -61,7 +61,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
     try {
       // ---- runner endpoints -------------------------------------------------
 
-      // Enrolment is the one unauthenticated route: the one-time token *is*
+      // Enrollment is the one unauthenticated route: the one-time token *is*
       // the credential, and it is consumed here.
       if (path === '/api/enroll' && request.method === 'POST') {
         return await enroll(request, env)
@@ -108,7 +108,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
           return await listRunners(env, principal.org)
         }
         if (path === '/api/enroll-token' && request.method === 'POST') {
-          return await createEnrolToken(request, env, principal.org, principal.id)
+          return await createEnrollToken(request, env, principal.org, principal.id)
         }
         if (path === '/api/runs' && request.method === 'GET') {
           return await listRuns(env, principal.org, url)
@@ -192,7 +192,7 @@ async function belongsTo(env: Env, runnerId: string, org: string): Promise<boole
 }
 
 /**
- * Exchange a one-time enrolment token for a long-lived runner credential.
+ * Exchange a one-time enrollment token for a long-lived runner credential.
  *
  * The invite is consumed in the same statement that checks it, so two runners
  * racing the same token cannot both succeed.
@@ -205,24 +205,24 @@ async function enroll(request: Request, env: Env): Promise<Response> {
     cliVersion?: string
   } | null
 
-  if (!body?.token) return fail('invalid_input', 'An enrolment token is required.')
+  if (!body?.token) return fail('invalid_input', 'An enrollment token is required.')
 
   const inviteHash = await hashToken(env, body.token)
   const invite = await env.DB.prepare(
-    `SELECT org, name_hint, expires_at, used_at FROM enrol_tokens WHERE token_hash = ?1`,
+    `SELECT org, name_hint, expires_at, used_at FROM enroll_tokens WHERE token_hash = ?1`,
   )
     .bind(inviteHash)
     .first<{ org: string; name_hint: string | null; expires_at: string; used_at: string | null }>()
 
-  if (!invite) return fail('invalid_token', 'That enrolment token is not valid.', 401)
-  if (invite.used_at) return fail('token_used', 'That enrolment token has already been used.', 409)
+  if (!invite) return fail('invalid_token', 'That enrollment token is not valid.', 401)
+  if (invite.used_at) return fail('token_used', 'That enrollment token has already been used.', 409)
   if (Date.parse(invite.expires_at) < Date.now()) {
-    return fail('token_expired', 'That enrolment token has expired.', 410)
+    return fail('token_expired', 'That enrollment token has expired.', 410)
   }
 
   // The plan limit, checked before the invite is consumed so a refused
-  // enrolment does not burn the token.
-  const allowance = await canEnrolRunner(env, invite.org)
+  // enrollment does not burn the token.
+  const allowance = await canEnrollRunner(env, invite.org)
   if (!allowance.allowed) {
     return json(
       {
@@ -245,14 +245,14 @@ async function enroll(request: Request, env: Env): Promise<Response> {
   const name = body.name ?? invite.name_hint ?? runnerId
 
   const consumed = await env.DB.prepare(
-    `UPDATE enrol_tokens SET used_at = ?1, runner_id = ?2
+    `UPDATE enroll_tokens SET used_at = ?1, runner_id = ?2
      WHERE token_hash = ?3 AND used_at IS NULL`,
   )
     .bind(nowIso(), runnerId, inviteHash)
     .run()
 
   if (!consumed.meta.changes) {
-    return fail('token_used', 'That enrolment token has already been used.', 409)
+    return fail('token_used', 'That enrollment token has already been used.', 409)
   }
 
   await env.DB.prepare(
@@ -266,7 +266,7 @@ async function enroll(request: Request, env: Env): Promise<Response> {
   return ok({ runnerId, token: rawToken, org: invite.org, name }, 201)
 }
 
-async function createEnrolToken(
+async function createEnrollToken(
   request: Request,
   env: Env,
   org: string,
@@ -278,7 +278,7 @@ async function createEnrolToken(
   const expires = new Date(Date.now() + ttlMinutes * 60_000).toISOString()
 
   await env.DB.prepare(
-    `INSERT INTO enrol_tokens (token_hash, org, name_hint, created_by, created_at, expires_at)
+    `INSERT INTO enroll_tokens (token_hash, org, name_hint, created_by, created_at, expires_at)
      VALUES (?1, ?2, ?3, ?4, ?5, ?6)`,
   )
     .bind(await hashToken(env, raw), org, body.name ?? null, createdBy, nowIso(), expires)

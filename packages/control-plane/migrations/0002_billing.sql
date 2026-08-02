@@ -1,4 +1,4 @@
--- Maps a Stripe customer back to a Clerk organisation.
+-- Maps a Stripe customer back to a Clerk organization.
 --
 -- Clerk metadata is the source of truth for *which plan* an org is on; this
 -- table exists only so webhooks that carry a customer id and nothing else can

@@ -77,7 +77,7 @@ If you would rather use `workers.dev` after all, set `workers_dev` back to
 - Tick **Allow GitHub Actions to create and approve pull requests**
 
 Changesets needs the second one to open the "Version Packages" PR. Because
-`circon-io` is an organisation, both may be locked at
+`circon-io` is an organization, both may be locked at
 `https://github.com/organizations/circon-io/settings/actions` — the repo-level
 control is greyed out until the org allows it.
 

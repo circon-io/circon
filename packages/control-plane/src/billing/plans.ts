@@ -3,7 +3,7 @@
  *
  * Everything that differs between tiers lives here — limits, features and which
  * Stripe price the plan maps to. Adding a tier or changing a limit is an edit
- * to this file and nothing else: enrolment, the dashboard and the upgrade
+ * to this file and nothing else: enrollment, the dashboard and the upgrade
  * prompt all read from it.
  *
  * Deliberately *not* in the database. A limit is product policy, not state, and
@@ -121,7 +121,7 @@ export function priceIdFor(
   return env[plan.stripePriceEnvVar] ?? null
 }
 
-/** Serialisable shape for the dashboard, so it never imports this module. */
+/** Serializable shape for the dashboard, so it never imports this module. */
 export function publicPlans() {
   return Object.values(PLANS).map((plan) => ({
     id: plan.id,

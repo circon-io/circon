@@ -149,7 +149,7 @@ export async function reportCommand(opts: { stdout?: boolean } = {}): Promise<nu
   lines.push('', '🖥️ Machine', ...(await machineHealth()))
   const report = lines.join('\n')
 
-  // Telegram was dropped in favour of the dashboard; until that exists the
+  // Telegram was dropped in favor of the dashboard; until that exists the
   // report is printed, and the systemd timer captures it into the journal.
   ui.info(report)
   return 0

@@ -1,14 +1,14 @@
 -- Control plane schema.
 --
 -- Runner credentials are stored only as SHA-256 hashes with a server-side
--- pepper, so a database dump does not yield working tokens. Enrolment tokens
+-- pepper, so a database dump does not yield working tokens. Enrollment tokens
 -- are single-use and expire, so a leaked invite is bounded in time.
 
 CREATE TABLE IF NOT EXISTS runners (
   id            TEXT PRIMARY KEY,
   name          TEXT NOT NULL,
   org           TEXT NOT NULL,
-  -- SHA-256 of pepper + raw token. The raw token is shown once, at enrolment.
+  -- SHA-256 of pepper + raw token. The raw token is shown once, at enrollment.
   token_hash    TEXT NOT NULL UNIQUE,
   platform      TEXT,
   cli_version   TEXT,
@@ -23,7 +23,7 @@ CREATE INDEX IF NOT EXISTS idx_runners_org ON runners (org);
 CREATE INDEX IF NOT EXISTS idx_runners_token ON runners (token_hash);
 
 -- One-time invitations. Consumed on first use; never reusable.
-CREATE TABLE IF NOT EXISTS enrol_tokens (
+CREATE TABLE IF NOT EXISTS enroll_tokens (
   token_hash  TEXT PRIMARY KEY,
   org         TEXT NOT NULL,
   name_hint   TEXT,

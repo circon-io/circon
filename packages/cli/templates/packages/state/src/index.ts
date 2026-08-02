@@ -5,7 +5,7 @@
  *
  *  - **Server data is not client state.** Do not mirror API responses in here.
  *    Fetch and cache them; this is for genuine UI and session state.
- *  - **Stores stay serialisable.** No class instances, no functions in state,
+ *  - **Stores stay serializable.** No class instances, no functions in state,
  *    so persistence and the dashboard can both read it.
  */
 

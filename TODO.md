@@ -65,7 +65,7 @@ One branch per run maps 1:1 to a PR and therefore 1:1 to a review decision:
 abandoned runs are deleted without touching anything else, and conflicts stay
 bounded to a single run's changes.
 
-### The review artefact
+### The review artifact
 
 - [x] Open a PR automatically when a run finishes with commits
 - [x] Generate the body: tasks done, agent notes, gate results per tier, cost
@@ -76,7 +76,7 @@ bounded to a single run's changes.
 gate must keep asserting on the tree — pixels are the wrong thing to fail a
 build on. But a reviewer deciding whether this is worth shipping wants to see
 it, and `agent-device` already has a `screenshot` command. Capture them once,
-after the gate is green, purely as a review artefact.
+after the gate is green, purely as a review artifact.
 
 ### Two approval gates
 
@@ -98,7 +98,7 @@ approve a changelog, look at screenshots and install a dev build without reading
 a diff. The changeset flow already produces the changelog; the dashboard just
 needs to render it as a report with an approve button.
 
-For mobile, the dev build is the artefact that makes gate 2 real: Codemagic
+For mobile, the dev build is the artifact that makes gate 2 real: Codemagic
 builds the PR, the reviewer installs it, then approves.
 
 ---
@@ -337,7 +337,7 @@ agent runtime needs adb, the emulator, the GPU and the project tree — a
 container with all of that mounted is a worse chroot. For reproducible
 *machines* the tool is cloud-init or Ansible. Only Ollama would benefit.
 
-**Telegram.** Dropped in favour of the dashboard. Notifications and the
+**Telegram.** Dropped in favor of the dashboard. Notifications and the
 `circon listen` control daemon both go; the dashboard is the single place to see
 runs and control them, and maintaining two control surfaces means neither is
 trusted.

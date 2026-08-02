@@ -39,7 +39,7 @@ ok "curl, git and certificates present"
 # --- 2. Node --------------------------------------------------------------
 # Adopt an existing install when it is new enough. A version manager (nvm, fnm,
 # volta) putting Node on PATH must not be shadowed by a NodeSource apt package,
-# or the machine ends up with two Nodes and behaviour that depends on shell
+# or the machine ends up with two Nodes and behavior that depends on shell
 # startup order.
 say "[2/3] Node.js"
 CURRENT_NODE=""

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { runGate, type GateDeps, type TierName } from './gate.ts'
 
 /**
- * Parity tests against the behaviours verified for the original bash `run_gate`
+ * Parity tests against the behaviors verified for the original bash `run_gate`
  * with fixture directories. Same cases, now without needing a real toolchain.
  */
 

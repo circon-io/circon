@@ -12,7 +12,7 @@ import { de } from './locales/de.ts'
 export type Locale = 'en' | 'de'
 export type TranslationKey = keyof typeof en
 
-const catalogues: Record<Locale, Record<TranslationKey, string>> = { en, de }
+const catalogs: Record<Locale, Record<TranslationKey, string>> = { en, de }
 
 export const locales: Locale[] = ['en', 'de']
 export const defaultLocale: Locale = 'en'
@@ -40,7 +40,7 @@ export function translate(
   key: TranslationKey,
   vars?: Record<string, string | number>,
 ): string {
-  const template = catalogues[locale][key] ?? catalogues[defaultLocale][key] ?? key
+  const template = catalogs[locale][key] ?? catalogs[defaultLocale][key] ?? key
   if (!vars) return template
   return template.replace(/\{(\w+)\}/g, (whole, name: string) =>
     name in vars ? String(vars[name]) : whole,

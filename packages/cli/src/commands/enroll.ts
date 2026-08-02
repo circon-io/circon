@@ -1,6 +1,6 @@
 import { hostname } from 'node:os'
 import { ui } from '../core/ui.ts'
-import { enroll, readEnrolment, writeEnrolment } from '../agent/control-plane.ts'
+import { enroll, readEnrollment, writeEnrollment } from '../agent/control-plane.ts'
 import { cliVersion } from './update.ts'
 
 /**
@@ -23,7 +23,7 @@ export async function enrollCommand(args: string[]): Promise<number> {
     return 1
   }
 
-  const existing = readEnrolment()
+  const existing = readEnrollment()
   if (existing) {
     ui.warn(`Already enrolled as "${existing.name}" (${existing.runnerId}).`)
     ui.dim('  Re-enrolling replaces that credential; the old one keeps working until revoked.')
@@ -33,13 +33,13 @@ export async function enrollCommand(args: string[]): Promise<number> {
   const result = await enroll(url, token, name ?? hostname(), cliVersion())
 
   if ('error' in result) {
-    ui.error(`Enrolment failed: ${result.error}`)
+    ui.error(`Enrollment failed: ${result.error}`)
     return 1
   }
 
-  writeEnrolment(result)
+  writeEnrollment(result)
   ui.ok(`Enrolled as "${result.name}" (${result.runnerId}) in ${result.org}.`)
-  ui.dim(`  Credential written to ~/.config/circon/enrolment.json, mode 0600.`)
+  ui.dim(`  Credential written to ~/.config/circon/enrollment.json, mode 0600.`)
   ui.info("Start the daemon with 'circon agent', or install it with 'circon setup'.")
   return 0
 }

@@ -1,6 +1,6 @@
 import { styleText } from 'node:util'
 
-/** Colour only when the terminal will render it; logs and pipes stay clean. */
+/** Color only when the terminal will render it; logs and pipes stay clean. */
 const useColor = process.stdout.isTTY && !process.env['NO_COLOR']
 
 type Style = Parameters<typeof styleText>[0]

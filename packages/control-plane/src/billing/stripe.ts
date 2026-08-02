@@ -41,14 +41,14 @@ export async function createCheckout(
     success_url: `${returnTo}?upgraded=1`,
     cancel_url: returnTo,
     // Reuse the customer when we already know it, so a second subscription is
-    // not created against a new customer record for the same organisation.
+    // not created against a new customer record for the same organization.
     ...(existing.tag.stripeCustomerId
       ? { customer: existing.tag.stripeCustomerId }
       : userEmail
         ? { customer_email: userEmail }
         : {}),
     // The link back to Clerk. Set on both the session and the subscription so
-    // every webhook, whichever object it carries, can find the organisation.
+    // every webhook, whichever object it carries, can find the organization.
     client_reference_id: orgId,
     metadata: { clerk_org_id: orgId },
     subscription_data: { metadata: { clerk_org_id: orgId } },
@@ -66,7 +66,7 @@ export async function createPortal(
 ): Promise<Response> {
   const { tag } = await entitlementFor(env, orgId)
   if (!tag.stripeCustomerId) {
-    return fail('no_subscription', 'This organisation has no Stripe customer yet.', 409)
+    return fail('no_subscription', 'This organization has no Stripe customer yet.', 409)
   }
 
   const stripe = client(env)
@@ -82,7 +82,7 @@ export async function createPortal(
  *
  * Metadata is the fast path; the customer table is the fallback for events that
  * carry only a customer id. Returning null rather than guessing is deliberate —
- * tagging the wrong organisation as paying is worse than dropping the event and
+ * tagging the wrong organization as paying is worse than dropping the event and
  * letting Stripe retry.
  */
 async function orgForEvent(
@@ -115,7 +115,7 @@ export async function handleWebhook(request: Request, env: Env): Promise<Respons
   const signature = request.headers.get('stripe-signature')
   if (!signature) return fail('unsigned', 'Missing stripe-signature header.', 400)
 
-  // Must be the raw body: any reserialisation changes the bytes and the
+  // Must be the raw body: any reserialization changes the bytes and the
   // signature will not match.
   const raw = await request.text()
 
@@ -188,7 +188,7 @@ export async function handleWebhook(request: Request, env: Env): Promise<Respons
       )
 
       await writeBillingTag(env, orgId, {
-        // An unrecognised price means a plan we do not model; fall back rather
+        // An unrecognized price means a plan we do not model; fall back rather
         // than granting whatever the last known tier was.
         plan: plan ?? 'basic',
         status: subscription.status,
