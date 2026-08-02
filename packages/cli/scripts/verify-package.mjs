@@ -18,6 +18,12 @@ const REQUIRED = [
   'templates/.circon/flows/web.sh',
   'templates/.circon/flows/android.sh',
   'templates/.circon/expected-web.txt',
+  'templates/.github/workflows/ci.yml',
+  'templates/.github/workflows/deploy.yml',
+  'templates/SECRETS.md',
+  'templates/packages/shared/src/index.ts',
+  'templates/packages/i18n/src/index.ts',
+  'templates/services/api/src/index.ts',
 ]
 
 function readStdin() {

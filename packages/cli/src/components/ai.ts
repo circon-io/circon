@@ -106,3 +106,35 @@ export const aiderComponent: Component = {
     if (!r.ok) throw new Error(`aider install failed (exit ${r.code})`)
   },
 }
+
+/**
+ * context7 supplies current library documentation to an agent at call time.
+ *
+ * The stack leans on packages that move fast — HeroUI Native is at 1.0 beta —
+ * where a model's training data is confidently wrong. Registering it with
+ * Claude Code is what makes the review pass cite the current API rather than
+ * last year's.
+ */
+export const context7Component: Component = {
+  id: 'context7',
+  summary: 'context7 MCP server (current library docs for agents)',
+  requires: ['js-globals'],
+
+  async check() {
+    if (!(await which('claude'))) return missing('claude not installed')
+    const list = await run('claude', ['mcp', 'list'], { timeoutMs: 30_000 })
+    if (!list.ok) return missing('could not list MCP servers')
+    return /context7/i.test(list.stdout) ? ok('registered') : missing('not registered')
+  },
+
+  async install() {
+    const added = await run(
+      'claude',
+      ['mcp', 'add', '--scope', 'user', 'context7', '--', 'npx', '-y', '@upstash/context7-mcp'],
+      { stream: true, timeoutMs: 120_000 },
+    )
+    if (!added.ok) {
+      throw new Error(`could not register context7 (exit ${added.code})`)
+    }
+  },
+}

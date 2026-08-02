@@ -17,6 +17,7 @@ Machine
 Projects
   circon init [name]               scaffold a monorepo wired to the gate
   circon run [maxLoops]            run the agent loop in the current project
+  circon job <org>__<repo> [n]     clone or update a project, then run it
   circon status                    tasks done and open in this project
   circon stop                      stop the running loop between iterations
   circon verify [reason]           Claude Code review of the recent diff
@@ -82,6 +83,17 @@ async function main(argv: string[]): Promise<number> {
     case 'init': {
       const { initCommand } = await import('./commands/init.ts')
       return initCommand(rest[0])
+    }
+
+    case 'job': {
+      const { jobCommand } = await import('./commands/job.ts')
+      const remoteIdx = rest.indexOf('--remote')
+      const remote = remoteIdx >= 0 ? rest[remoteIdx + 1] : undefined
+      const loops = rest.slice(1).find((a) => /^\d+$/.test(a))
+      return jobCommand(rest[0], {
+        ...(loops ? { maxLoops: parseInt(loops, 10) } : {}),
+        ...(remote ? { remote } : {}),
+      })
     }
 
     case 'run': {

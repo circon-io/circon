@@ -7,6 +7,7 @@ import { nodeComponent, jsGlobalsComponent } from './node.ts'
 import { androidStudioComponent, androidSdkComponent } from './android.ts'
 import {
   ollamaComponent, ollamaModelComponent, ollamaTuningComponent, aiderComponent,
+  context7Component,
 } from './ai.ts'
 import { workspaceComponent, conventionsComponent, dailyReportComponent } from './workspace.ts'
 
@@ -25,6 +26,7 @@ export const components: Component[] = [
   androidStudioComponent,
   androidSdkComponent,
   aiderComponent,
+  context7Component,
   ollamaComponent,
   ollamaModelComponent,
   ollamaTuningComponent,

@@ -47,6 +47,27 @@ export async function configCommand(): Promise<number> {
     }
 
     ui.blank()
+    ui.info('Project credentials — used by scaffolded projects, Enter to skip')
+    ui.dim('  Cloudflare tokens must be scoped to one account and only the')
+    ui.dim('  resources that project needs. Never a global API key.')
+    const project = readEnvFile('project')
+    const cfToken = await ask(rl, 'Cloudflare API token', project['CLOUDFLARE_API_TOKEN'])
+    const cfAccount = await ask(rl, 'Cloudflare account ID', project['CLOUDFLARE_ACCOUNT_ID'])
+    const ghToken = await ask(rl, 'GitHub token (repo + workflow)', project['GITHUB_TOKEN'])
+    const clerk = await ask(rl, 'Clerk secret key', project['CLERK_SECRET_KEY'])
+    const sentry = await ask(rl, 'Sentry auth token', project['SENTRY_AUTH_TOKEN'])
+    const entries: Record<string, string> = {}
+    if (cfToken) entries['CLOUDFLARE_API_TOKEN'] = cfToken
+    if (cfAccount) entries['CLOUDFLARE_ACCOUNT_ID'] = cfAccount
+    if (ghToken) entries['GITHUB_TOKEN'] = ghToken
+    if (clerk) entries['CLERK_SECRET_KEY'] = clerk
+    if (sentry) entries['SENTRY_AUTH_TOKEN'] = sentry
+    if (Object.keys(entries).length) {
+      writeEnvFile('project', entries, 'Project credentials (mode 0600)')
+      ui.ok(`Saved ${Object.keys(entries).length} project credential(s).`)
+    }
+
+    ui.blank()
     ui.info('Conventions repository — Enter to keep the default')
     const repo = await ask(rl, 'Git URL', cfg.conventionsRepo)
     if (repo) writeConfig({ conventionsRepo: repo })

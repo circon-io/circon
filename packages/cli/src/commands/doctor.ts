@@ -3,6 +3,8 @@ import { components } from '../components/registry.ts'
 import type { CheckResult, Component } from '../components/types.ts'
 import { ui } from '../core/ui.ts'
 import { paths } from '../core/paths.ts'
+import { detectDrift } from '../core/conventions.ts'
+import { cliVersion } from './update.ts'
 
 export interface Diagnosis {
   component: Component
@@ -91,6 +93,13 @@ export async function doctorCommand(): Promise<number> {
   }
   if (!missing.length && !outdated.length && !failed.length) {
     ui.ok('Everything the machine needs is present.')
+  }
+
+  const drift = await detectDrift(cliVersion())
+  if (drift.length) {
+    ui.blank()
+    ui.warn('Conventions ask for things this machine does not have:')
+    for (const d of drift) ui.dim(`  ${d.requirement} — ${d.detail}`)
   }
 
   ui.blank()

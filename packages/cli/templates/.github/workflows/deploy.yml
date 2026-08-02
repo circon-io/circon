@@ -1,0 +1,64 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  check:
+    uses: ./.github/workflows/ci.yml
+
+  deploy:
+    needs: check
+    runs-on: ubuntu-latest
+    # A GitHub Environment with required reviewers *is* the release approval
+    # gate — the deploy pauses here until someone approves it. No dashboard
+    # needed to get gate 2.
+    environment:
+      name: production
+      url: ${{ steps.web.outputs.url }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Deploy Workers API
+        if: hashFiles('services/api/wrangler.jsonc', 'services/api/wrangler.toml') != ''
+        run: pnpm --filter ./services/api exec wrangler deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Deploy web
+        id: web
+        if: hashFiles('apps/web/package.json') != ''
+        run: pnpm --filter ./apps/web run deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ vars.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
+          NEXT_PUBLIC_SENTRY_DSN: ${{ vars.NEXT_PUBLIC_SENTRY_DSN }}
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+
+      # Mobile builds need macOS, so they run on Codemagic. This only asks for
+      # one; the artefacts and store submission happen there.
+      - name: Trigger the mobile release
+        if: vars.CODEMAGIC_APP_ID != ''
+        run: |
+          curl -sS -X POST https://api.codemagic.io/builds \
+            -H "x-auth-token: ${{ secrets.CODEMAGIC_API_TOKEN }}" \
+            -H 'Content-Type: application/json' \
+            -d '{"appId":"${{ vars.CODEMAGIC_APP_ID }}","workflowId":"release","branch":"main"}'

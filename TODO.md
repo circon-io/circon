@@ -47,9 +47,9 @@ The runner currently has no idea what a project is — `circon run` operates on
 
 ### Workspace
 
-- [ ] Clone to `~/circon-projects/<org>__<repo>`, one directory per project
-- [ ] `circon job <project-slug>` — clone or pull, then run
-- [ ] Pull `main` before each run; never touch the working tree of another job
+- [x] Clone to `~/circon-projects/<org>__<repo>`, one directory per project
+- [x] `circon job <project-slug>` — clone or pull, then run
+- [x] Pull `main` before each run; never touch the working tree of another job
 
 A dashboard project *is* a connected GitHub repository, so the slug is already
 `<organization>__<repository>`. That becomes the directory name, and the runner
@@ -86,7 +86,7 @@ run ──▶ PR ──▶ [gate 1: merge]  ──▶ main
 ```
 
 - [ ] Gate 1 — merging the PR means "this code is accepted"
-- [ ] Gate 2 — merging the Changesets version PR triggers the actual release
+- [x] Gate 2 — merging the Changesets version PR triggers the actual release
 - [ ] Release report in the dashboard: changelog, screenshots, gate results,
       Codemagic dev-build link, cost
 - [ ] Approving the release report merges the version PR
@@ -209,10 +209,10 @@ deletes anything.
 
 ## 7. Pin conventions to what the runner has
 
-- [ ] Version the conventions repo (git tags, semver)
-- [ ] `@circon/cli` declares the convention range it supports
-- [ ] Runner resolves the newest conventions **within** that range, not `HEAD`
-- [ ] `circon doctor` reports conventions requiring tooling that is not installed
+- [x] Version the conventions repo (git tags, semver)
+- [x] `@circon/cli` declares the convention range it supports
+- [x] Runner resolves the newest conventions **within** that range, not `HEAD`
+- [x] `circon doctor` reports conventions requiring tooling that is not installed
 - [ ] Dashboard shows each runner's CLI and resolved convention version
 
 `ARCHITECTURE.md` states which package manager, Expo SDK and Node version to
@@ -235,9 +235,9 @@ the machine, extended to the contract the agent follows.
 
 - [ ] `apps/web` — Next.js on Cloudflare via `@opennextjs/cloudflare`, HeroUI, Fragment UI
 - [ ] `apps/mobile` — Expo with HeroUI Native
-- [ ] `services/api` — Cloudflare Worker
-- [ ] Zustand, Clerk, Sentry, i18n (en + de) wired in
-- [ ] `packages/ui` adapter so Fragment UI can be swapped out locally
+- [x] `services/api` — Cloudflare Worker
+- [x] Zustand, Clerk, Sentry, i18n (en + de) wired in
+- [x] `packages/ui` adapter so Fragment UI can be swapped out locally
 
 `circon init` currently produces an empty monorepo shell plus the gate flows.
 `ARCHITECTURE.md` already specifies all of the above; nothing generates it.
@@ -250,8 +250,8 @@ local change rather than a rewrite.
 
 ## 9. CI/CD shipped inside the boilerplate
 
-- [ ] `.github/workflows/ci.yml` in the template — typecheck, test, gate tiers
-- [ ] `.github/workflows/deploy.yml` — web + Workers to Cloudflare
+- [x] `.github/workflows/ci.yml` in the template — typecheck, test, gate tiers
+- [x] `.github/workflows/deploy.yml` — web + Workers to Cloudflare
 - [ ] `codemagic.yaml` — iOS dev builds and both platforms' store releases
 - [ ] Changesets wired into the project template
 - [ ] `circon init` creates the GitHub repo and pushes, so CI exists from commit one
@@ -272,9 +272,9 @@ gated through `needs:` so a publish cannot outrun its checks.
 
 ## 10. Credentials and context7
 
-- [ ] `circon config` prompts for GitHub, Clerk, Cloudflare and Sentry tokens
-- [ ] Guidance or tooling for least-privilege, per-project Cloudflare tokens
-- [ ] Install context7 MCP so agents get current docs for fast-moving betas
+- [x] `circon config` prompts for GitHub, Clerk, Cloudflare and Sentry tokens
+- [x] Guidance or tooling for least-privilege, per-project Cloudflare tokens
+- [x] Install context7 MCP so agents get current docs for fast-moving betas
 
 context7 matters because the stack leans on packages that move fast (HeroUI
 Native is at 1.0 beta), where training data goes stale.

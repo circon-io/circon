@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  pull_request:
+  workflow_call:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Version comes from packageManager in package.json — setting it here too
+      # makes pnpm/action-setup error with "Multiple versions of pnpm".
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test
+
+      # The same accessibility gate circon runs locally, so a human PR is held
+      # to the contract the agent is held to.
+      - name: UI gate
+        run: |
+          if [ -x .circon/flows/web.sh ]; then
+            npx --yes agent-device --version > /dev/null 2>&1 || npm i -g agent-device
+            ./.circon/flows/web.sh
+          else
+            echo "No .circon/flows/web.sh — skipping the UI gate."
+          fi
