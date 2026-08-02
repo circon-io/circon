@@ -1,0 +1,54 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write        # push the version commit and tags
+      pull-requests: write   # open the "Version Packages" PR
+      id-token: write        # OIDC — this is what replaces NPM_TOKEN
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+        with:
+          # Pinned to 10 deliberately: pnpm 11 has an open regression where
+          # OIDC publishing fails with a 404 (pnpm/pnpm#11513).
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          # Trusted publishing needs Node >= 22.14 and npm >= 11.5.1.
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          cache: pnpm
+
+      - name: Ensure npm supports OIDC
+        run: |
+          npm install -g npm@latest
+          npm --version
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+
+      # Opens a "Version Packages" PR while changesets are pending; publishes
+      # once that PR is merged. No NPM_TOKEN: npm detects the OIDC environment
+      # and mints a short-lived credential, and provenance is automatic.
+      - uses: changesets/action@v1
+        with:
+          version: pnpm changeset version
+          publish: pnpm changeset publish
+          commit: "chore: version packages"
+          title: "chore: version packages"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

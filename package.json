@@ -7,9 +7,16 @@
     "build": "pnpm --recursive build",
     "test": "pnpm --recursive --if-present test",
     "typecheck": "pnpm --recursive --if-present typecheck",
-    "check:sh": "bash -n init.sh"
+    "check:sh": "bash -n init.sh",
+    "changeset": "changeset",
+    "version-packages": "changeset version",
+    "release": "changeset publish"
   },
   "engines": {
     "node": ">=22.12"
-  }
+  },
+  "devDependencies": {
+    "@changesets/cli": "^2.27.0"
+  },
+  "packageManager": "pnpm@10.0.0"
 }
