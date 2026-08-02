@@ -59,6 +59,38 @@ function credentials(env = process.env) {
   return { token, account }
 }
 
+/**
+ * Cloudflare returns 10000 "Authentication error" for *both* a bad token and a
+ * valid token lacking a permission, which are very different fixes. Verifying
+ * the token separately tells them apart, so the message can name the actual
+ * problem instead of leaving you to guess.
+ */
+async function explainAuthFailure(token) {
+  try {
+    const res = await fetch(`${API}/user/tokens/verify`, {
+      headers: { authorization: `Bearer ${token}` },
+    })
+    const body = await res.json().catch(() => null)
+
+    if (body?.success) {
+      return [
+        'The token is valid, so this is a missing permission.',
+        '',
+        'The D1 endpoints need:  Account · D1 · Edit',
+        'Add it at https://dash.cloudflare.com/profile/api-tokens, and check',
+        'Account Resources includes the account in CLOUDFLARE_ACCOUNT_ID.',
+      ].join('\n')
+    }
+    return [
+      'The token itself was rejected — it is invalid, expired, or revoked.',
+      'Re-create it at https://dash.cloudflare.com/profile/api-tokens and',
+      'update the CLOUDFLARE_API_TOKEN secret.',
+    ].join('\n')
+  } catch {
+    return 'Could not reach the Cloudflare API to diagnose further.'
+  }
+}
+
 async function api(path, init = {}) {
   const { token, account } = credentials()
   const res = await fetch(`${API}/accounts/${account}${path}`, {
@@ -72,9 +104,13 @@ async function api(path, init = {}) {
 
   const body = await res.json().catch(() => null)
   if (!body?.success) {
-    // Surface Cloudflare's own error text: "Authentication error" here almost
-    // always means the token is missing D1 · Edit, and saying so beats a 403.
-    const detail = body?.errors?.map((e) => `${e.code}: ${e.message}`).join('; ')
+    const errors = body?.errors ?? []
+    const detail = errors.map((e) => `${e.code}: ${e.message}`).join('; ')
+
+    // 10000 is ambiguous between "bad token" and "token lacks permission".
+    if (errors.some((e) => e.code === 10000) || res.status === 403) {
+      throw new Error(`${detail || 'Authentication error'}\n\n${await explainAuthFailure(token)}`)
+    }
     throw new Error(detail || `Cloudflare API returned HTTP ${res.status}`)
   }
   return body.result
