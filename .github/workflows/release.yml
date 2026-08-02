@@ -17,6 +17,10 @@ jobs:
   release:
     needs: check
     runs-on: ubuntu-latest
+    # Must match the Environment field on the npm trusted publisher exactly.
+    # Blank there and set here (or the reverse) makes the OIDC claim mismatch,
+    # and npm reports that as a bare E404 on publish, not an auth error.
+    environment: production
     permissions:
       contents: write        # push the version commit and tags
       pull-requests: write   # open the "Version Packages" PR
