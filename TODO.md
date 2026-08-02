@@ -97,6 +97,45 @@ no queue, the SDK is already there); only iOS needs cloud. Codemagic's 500 free
 minutes/month covers the expected iOS volume, where EAS's 15-build cap would be
 consumed by development alone.
 
+### macOS as a first-class runner
+
+- [ ] Give `Component` per-platform install strategies instead of `linuxOnly`
+- [ ] `brew-base` alongside `apt-base`; Node and aider via Homebrew on darwin
+- [ ] Ollama on macOS (Metal, no CUDA path) and the Android SDK mac tarball
+- [ ] launchd agent instead of the systemd `--user` timer for the daily report
+- [ ] Screen Sharing / VNC instead of GNOME Remote Desktop
+- [ ] Lift the `uname -s` guard in `init.sh`, or ship a `bootstrap-macos.sh`
+
+**7 of 19 components already work anywhere** — `node`, `js-globals`, `aider`,
+`workspace`, `conventions`, `shell-env`, `git-identity`. `doctor` runs cleanly
+on macOS today and reports the rest as *skipped*. So this is filling gaps, not
+a rewrite.
+
+The 12 that need a darwin path:
+
+| Component | macOS equivalent |
+|---|---|
+| `apt-base` | Homebrew formulae |
+| `nvidia`, `kvm`, `sysctl` | **not applicable** — Metal replaces CUDA, no KVM, kqueue has no inotify limit |
+| `docker` | Docker Desktop or colima |
+| `ollama`, `ollama-model` | native installer; `ollama-tuning` is a no-op (flash attention is a Linux systemd override) |
+| `android-studio`, `android-sdk` | both exist for macOS; the cmdline-tools URL is `commandlinetools-mac-*` |
+| `ssh` | Remote Login via `systemsetup` |
+| `daily-report` | launchd plist, not systemd |
+
+`Component.linuxOnly` is the wrong shape for this — it should become something
+like `platforms: ['linux', 'darwin']` with the install body branching, or
+platform-specific variants selected in the registry. Worth deciding before more
+components are written against the current flag.
+
+**Why this matters more than it looks:** macOS support and the Mac mini in the
+iOS section are the *same purchase*. If the Mac runs circon natively, Loop 3
+stops being an SSH-orchestrated appliance and becomes a local gate tier — no
+`go-ios`, no remote transport, no `mac` mode at all. A second runner that also
+happens to be the only machine that can build and test iOS.
+
+It would also let the loop run on the laptop, without RDP into the Ubuntu box.
+
 ### Credentials and context7
 
 - [ ] `circon config` prompts for GitHub, Clerk, Cloudflare and Sentry tokens
@@ -107,34 +146,3 @@ consumed by development alone.
 that project's resources — with nothing to produce them. context7 matters
 because the stack leans on packages that move fast (HeroUI Native is at 1.0
 beta), where training data goes stale.
-
----
-
-## Operational
-
-- [ ] Install the CLI tarball on the Ubuntu box and read `circon doctor`
-- [ ] `circon setup` twice — the second run must be a clean no-op
-- [ ] A real `circon run` on a throwaway project
-- [ ] Publish `0.1.0` by hand, then configure the npm trusted publisher
-      (org `circon-io`, repo `circon`, workflow `release.yml`)
-- [ ] Push `circon-conventions` to `circon-io`
-- [ ] Legacy cleanup on the box: remove `/usr/local/bin/{ralph,solyd-*}` and
-      `systemctl --user disable --now solyd-daily-report.timer` — it is still
-      enabled and will fail nightly calling a deleted script
-- [ ] Rename the local directory `solyd-machine` → `circon`
-
-**Nothing Linux-specific has ever executed.** Only `doctor` and
-`setup --dry-run` are verified, and on macOS nearly every component skips. Every
-`install()`, and all the apt/snap/systemd/ollama/android probes, are unexercised.
-Read `doctor` carefully before letting `setup` touch a working machine.
-
----
-
-## Decided against
-
-**Docker.** Not the right axis. NVIDIA kernel modules, KVM, the Android emulator
-and USB for go-ios all need host hardware access, which is the point of this
-machine. The agent runtime needs adb, the emulator, the GPU, USB and the project
-tree — a container with all of that mounted is a worse chroot. For reproducible
-*machines* the tool is cloud-init or Ansible. Only Ollama would benefit, and
-that is optional.
