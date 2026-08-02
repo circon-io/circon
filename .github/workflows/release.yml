@@ -20,11 +20,13 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Version comes from packageManager in package.json — specifying it here
+      # as well makes action-setup error out with "Multiple versions of pnpm".
+      #
+      # That pin is deliberately on 10.x: pnpm 11 has an open regression where
+      # OIDC publishing fails with a 404 (pnpm/pnpm#11513). Do not bump it to 11
+      # until that is fixed, or releases will break with a confusing auth error.
       - uses: pnpm/action-setup@v4
-        with:
-          # Pinned to 10 deliberately: pnpm 11 has an open regression where
-          # OIDC publishing fails with a 404 (pnpm/pnpm#11513).
-          version: 10
 
       - uses: actions/setup-node@v4
         with:
