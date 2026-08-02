@@ -1,6 +1,6 @@
 {
   "name": "@circon/cli",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Autonomous AI development runner: converge the machine, run the agent loop, report on it",
   "license": "MIT",
   "type": "module",
