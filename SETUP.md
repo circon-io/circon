@@ -128,6 +128,25 @@ other, both surface as a bare `E404` on publish rather than an auth error.
 
 ## 8. Cloudflare
 
+### Register a workers.dev subdomain — once, before the first deploy
+
+**Workers & Pages → Register subdomain**, or
+`https://dash.cloudflare.com/<account-id>/workers/onboarding`
+
+Pick any name. It will not be used — both Workers set `workers_dev: false` and
+deploy to your own domains — but **the account must still have one**, or every
+deploy fails with:
+
+```
+You need a workers.dev subdomain in order to proceed [code: 10063]
+```
+
+This is an account-level prerequisite, not something the config can satisfy. It
+catches people out precisely because `workers_dev: false` reads like it should
+make the requirement go away.
+
+### Everything else
+
 Nothing to create by hand. The deploy workflow creates the D1 database if it is
 absent and adopts it if it exists; Durable Objects, assets and bindings are all
 declared in `wrangler.jsonc`.
@@ -173,6 +192,7 @@ rather than reaching for the template.
                  CONTROL_PLANE_DOMAIN, DASHBOARD_DOMAIN,
                  CONTROL_PLANE_URL, DASHBOARD_ORIGIN)
 [ ] Zone on Cloudflare, token has zone-level Workers Routes/DNS/Zone perms
+[ ] workers.dev subdomain registered on the account (required even when unused)
 [ ] Workflow permissions: read/write + allow PR creation
 [ ] Stripe product, price, webhook endpoint
 [ ] npm: manual first publish, then trusted publisher
