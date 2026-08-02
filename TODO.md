@@ -62,14 +62,24 @@ Metro at runtime, so iteration does not cost a cloud build.
 - [ ] WebSocket log streaming, dashboard subscribes to the same DO
 - [ ] Next.js dashboard on Workers, Clerk auth, D1 for run history and cost
 
-**Phase 2 — configuration from the dashboard**
+**Phase 2 — configuration and PRDs from the dashboard**
 
 - [ ] Per-runner config: which models, which gate tiers, which features
 - [ ] Org-level defaults that a runner can override
 - [ ] Secret distribution (Anthropic, Cloudflare, Clerk, Sentry, Telegram)
-- [ ] `circon run` pulls config at start, alongside conventions and the PRD
+- [ ] PRD editing in the dashboard, committed to GitHub via a GitHub App
+- [ ] Push config and PRD changes to a running runner over its existing socket
+- [ ] Apply them at the **next iteration boundary**, never mid-iteration
 - [ ] Encrypted local cache so an unreachable control plane never blocks a run
 - [ ] Per-runner revocation
+
+**Phase 3 — runners as daemons**
+
+- [ ] `circon agent` — long-lived process, connects to its DO, heartbeats, waits
+- [ ] systemd unit (Linux) and launchd agent (macOS), enabled at boot
+- [ ] Start / stop / queue a job from the dashboard
+- [ ] Restart with backoff; survive control-plane outages without dying
+- [ ] Reuse the existing run lock so a dispatched job cannot race a manual one
 
 The GitLab-runner model, entirely on the existing stack. DO hibernation means
 idle runners cost nothing.
@@ -110,18 +120,84 @@ Four decisions to make before writing any of it:
    to the cached copy rather than refusing to run. Otherwise centralising
    configuration turns a working machine into one that depends on a service
    being up — a clear regression.
-3. **Pull timing.** Same single point as conventions and the PRD: run start,
-   never mid-loop. Keeps the invariant that a run's inputs cannot change under
-   it.
+3. **Where the PRD actually lives.** The dashboard should be an *editor*, not
+   the store: it writes through to GitHub with a GitHub App. That keeps history,
+   PR review and offline access, and stops the control plane becoming a file
+   server that needs its own conflict resolution. A runner still reads the PRD
+   from the repo — the dashboard just saves you opening an editor.
 4. **Enrolment vs runtime credential.** A short-lived one-time enrolment token
    exchanged for a per-runner credential, so a compromised runner is revoked
    alone. A single shared long-lived token is simpler and much worse.
+
+#### Live updates: reconciling with the "no mid-loop pull" rule
+
+Updating a running runner's PRD and config **contradicts an invariant the CLI
+was built around**, so it needs stating rather than quietly reversing.
+
+Today conventions and the PRD are fetched once at run start and never again,
+because pulling while the agent is mid-edit races its own commits: aider writes
+to a file that changed underneath it, `git reset --hard` on a failed gate throws
+away the wrong thing, and the task the agent is working on can vanish.
+
+The resolution is that **"live" should mean the next iteration boundary, not
+mid-write**. The loop already pauses between iterations to check the stop flag —
+that same point is where a pushed config or PRD update gets applied. In practice
+that is seconds to minutes, which is what "update it while it runs" actually
+needs, and it keeps every guarantee:
+
+- no file changes underneath a running aider process
+- the gate's revert still only ever discards the agent's own work
+- an iteration's inputs are fixed for its whole duration, so a failure is
+  reproducible
+
+Mechanism: the runner already holds a WebSocket to its Durable Object for log
+streaming, so the control plane pushes a "config changed" / "PRD changed" event
+and the runner applies it at the next boundary. No polling, and no separate
+transport.
+
+One case still needs a decision: an update that lands while the agent is
+mid-task on something the update deletes. Options are finish the iteration then
+re-plan, or abort and revert immediately. Recommend finishing — an aborted
+iteration wastes the tokens already spent and leaves progress notes describing
+work that was thrown away.
 
 Secrets are the part to be conservative about. Distributing them means the
 control plane's blast radius becomes every credential on every runner — worth it
 for disposable runners, but it needs Secrets Store, TLS-only delivery,
 short-lived tokens, and an audit trail. `ARCHITECTURE.md` already mandates
 least-privilege Cloudflare tokens, which limits the damage if one leaks.
+
+### Pin conventions to what the runner actually has
+
+- [ ] Version the conventions repo (git tags, semver)
+- [ ] `@circon/cli` declares the convention range it supports
+- [ ] Runner pulls the newest conventions **within** that range, not just `HEAD`
+- [ ] `circon doctor` reports conventions requiring tooling that is not installed
+- [ ] Dashboard shows each runner's CLI version and resolved convention version
+
+`ARCHITECTURE.md` states things like which package manager, which Expo SDK and
+which Node version to build against. Nothing today checks that against the
+machine, so a convention edit can instruct the agent to use tooling the runner
+does not have — and the failure surfaces as a confusing gate error several
+iterations later, not as "your conventions and your machine disagree".
+
+The fix is to treat conventions as a versioned dependency of the CLI rather than
+a floating pointer:
+
+```
+conventions v3  ── requires ──▶  cli >= 0.4   (pnpm 10, Node 24, Expo 57)
+conventions v4  ── requires ──▶  cli >= 0.6   (Expo 58)
+```
+
+A runner on CLI 0.4 keeps resolving to conventions v3 and stays internally
+consistent. Upgrading the conventions to require new tooling then forces a
+deliberate `npm update -g @circon/cli && circon setup --upgrade`, instead of
+silently instructing an agent to use something that is not there.
+
+This is the same discipline the component model already applies to the machine —
+pinned versus floating, and never an implicit upgrade — extended to the contract
+the agent follows. It is worth doing even without a control plane; the dashboard
+just makes the mismatch visible across a fleet.
 
 ### Project scaffold — wire the real stack
 
