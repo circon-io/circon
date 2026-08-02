@@ -16,15 +16,32 @@ export interface Config {
   verifyEvery?: number
   verifyModel?: string
   verifyBudgetUsd?: number
+  /** 0 means no limit. */
+  budgetPerRunUsd?: number
+  budgetPerDayUsd?: number
   reportHour?: number
   iosRunnerMode?: 'none' | 'mac' | 'device' | 'vm'
 }
 
-const DEFAULTS: Required<Pick<Config, 'workBranch' | 'verifyEvery' | 'verifyModel' | 'verifyBudgetUsd' | 'iosRunnerMode'>> = {
+const DEFAULTS: Required<
+  Pick<
+    Config,
+    | 'workBranch'
+    | 'verifyEvery'
+    | 'verifyModel'
+    | 'verifyBudgetUsd'
+    | 'budgetPerRunUsd'
+    | 'budgetPerDayUsd'
+    | 'iosRunnerMode'
+  >
+> = {
   workBranch: 'circon/work',
   verifyEvery: 5,
   verifyModel: 'sonnet',
   verifyBudgetUsd: 0.5,
+  // Conservative defaults: a runaway loop is capped before it is noticed.
+  budgetPerRunUsd: 10,
+  budgetPerDayUsd: 40,
   iosRunnerMode: 'none',
 }
 

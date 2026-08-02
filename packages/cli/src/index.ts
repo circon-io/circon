@@ -17,13 +17,13 @@ Machine
 Projects
   circon init [name]               scaffold a monorepo wired to the gate
   circon run [maxLoops]            run the agent loop in the current project
+  circon status                    tasks done and open in this project
   circon stop                      stop the running loop between iterations
   circon verify [reason]           Claude Code review of the recent diff
 
 Reporting
   circon report [--stdout]         daily digest
-  circon notify <message>          send a Telegram message
-  circon listen                    Telegram control daemon
+  circon gc [--dry-run]            reclaim disk: old logs, merged run branches
 
   circon --version
 `
@@ -105,14 +105,14 @@ async function main(argv: string[]): Promise<number> {
       return reportCommand({ stdout: rest.includes('--stdout') })
     }
 
-    case 'notify': {
-      const { notifyCommand } = await import('./commands/notify.ts')
-      return notifyCommand(rest.join(' '))
+    case 'gc': {
+      const { gcCommand } = await import('./commands/gc.ts')
+      return gcCommand({ dryRun: rest.includes('--dry-run') })
     }
 
-    case 'listen': {
-      const { listenCommand } = await import('./commands/listen.ts')
-      return listenCommand()
+    case 'status': {
+      const { statusCommand } = await import('./commands/status.ts')
+      return statusCommand()
     }
 
     default:

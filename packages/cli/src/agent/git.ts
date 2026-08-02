@@ -45,39 +45,25 @@ export class Repo {
   }
 
   /**
-   * Put the agent on its own branch.
+   * Start a fresh branch for this run, from the up-to-date base.
    *
-   * This is what makes the loop's `reset --hard` safe: it can only ever discard
-   * the agent's own work, never a human commit on the default branch. Your PRD
-   * edits land on main and are merged in here at run start.
+   * One branch per run rather than a long-lived work branch: it maps 1:1 to a
+   * pull request and therefore to a single review decision, an abandoned run is
+   * deleted without touching anything else, and conflicts stay bounded to one
+   * run's changes. It also keeps the loop's `reset --hard` incapable of
+   * discarding anything but the agent's own work.
    */
-  async ensureWorkBranch(branch: string, base: string): Promise<{ created: boolean; merged: boolean }> {
-    const exists = (await this.git('rev-parse', '--verify', branch)).ok
-    let created = false
-
-    if (!exists) {
-      const r = await this.git('checkout', '-b', branch)
-      if (!r.ok) throw new Error(`could not create ${branch}: ${r.stderr.trim()}`)
-      created = true
-    } else if ((await this.currentBranch()) !== branch) {
-      const r = await this.git('checkout', branch)
-      if (!r.ok) throw new Error(`could not switch to ${branch}: ${r.stderr.trim()}`)
+  async createRunBranch(branch: string, base: string): Promise<void> {
+    const dirty = await this.git('status', '--porcelain')
+    if (dirty.ok && dirty.stdout.trim()) {
+      throw new Error('the working tree has uncommitted changes — commit or stash them first')
     }
-
-    // Bring in whatever landed on the base branch since the last run — this is
-    // the single pull point, before any iteration starts.
-    let merged = false
-    if (!created && (await this.git('rev-parse', '--verify', base)).ok) {
-      const r = await this.git('merge', '--no-edit', base)
-      merged = r.ok
-      if (!r.ok) {
-        await this.git('merge', '--abort')
-        throw new Error(
-          `merging ${base} into ${branch} conflicts. Resolve it by hand, then re-run.`,
-        )
-      }
+    if ((await this.git('rev-parse', '--verify', base)).ok) {
+      const checkout = await this.git('checkout', base)
+      if (!checkout.ok) throw new Error(`could not check out ${base}: ${checkout.stderr.trim()}`)
     }
-    return { created, merged }
+    const created = await this.git('checkout', '-b', branch)
+    if (!created.ok) throw new Error(`could not create ${branch}: ${created.stderr.trim()}`)
   }
 
   async fetch(): Promise<boolean> {

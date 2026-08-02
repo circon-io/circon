@@ -20,13 +20,13 @@ premise — the control plane would be a window onto nothing.
 
 ## 1. Spend control
 
-- [ ] `budget.perRun` and `budget.perDay` in config, dashboard-editable
-- [ ] Parse aider's per-message cost line; accumulate per run
-- [ ] Add the verify pass and any cloud build to the same ledger
-- [ ] **Hard stop** when a cap is hit, mid-run, not a warning after the fact
-- [ ] Spend ledger at `~/.local/state/circon/spend.json`, rolling per day
+- [x] `budget.perRun` and `budget.perDay` in config, dashboard-editable
+- [x] Parse aider's per-message cost line; accumulate per run
+- [x] Add the verify pass and any cloud build to the same ledger
+- [x] **Hard stop** when a cap is hit, mid-run, not a warning after the fact
+- [x] Spend ledger at `~/.local/state/circon/spend.json`, rolling per day
 - [ ] Cost per run in the daily report and in the PR body
-- [ ] Refuse to start a run that would exceed the daily cap
+- [x] Refuse to start a run that would exceed the daily cap
 
 Correctness has a circuit breaker; spend has nothing. `verifyBudgetUsd` caps one
 review pass at $0.50 and that is the only limit anywhere.
@@ -57,8 +57,8 @@ never has to guess where anything lives.
 
 ### Branch per run, not a long-lived work branch
 
-- [ ] Replace `circon/work` with `circon/run-<date>-<shortid>`
-- [ ] Delete the branch when its PR merges or the run is abandoned
+- [x] Replace `circon/work` with `circon/run-<date>-<shortid>`
+- [x] Delete the branch when its PR merges or the run is abandoned
 
 `circon/work` accumulates unrelated work and can never be partially accepted.
 One branch per run maps 1:1 to a PR and therefore 1:1 to a review decision:
@@ -67,9 +67,9 @@ bounded to a single run's changes.
 
 ### The review artefact
 
-- [ ] Open a PR automatically when a run finishes with commits
-- [ ] Generate the body: tasks done, agent notes, gate results per tier, cost
-- [ ] Capture a screenshot per screen at the end of a green run, attach to the PR
+- [x] Open a PR automatically when a run finishes with commits
+- [x] Generate the body: tasks done, agent notes, gate results per tier, cost
+- [x] Capture a screenshot per screen at the end of a green run, attach to the PR
 - [ ] Link the PR to its dashboard run view, and the run view back to the PR
 
 **Accessibility trees are for the machine; screenshots are for the human.** The
@@ -156,10 +156,10 @@ becoming a compromised estate.
 
 ## 4. Stop the agent editing the human's file
 
-- [ ] Move task completion out of `PRD.md` into `.circon/progress.json`
-- [ ] Agent reads `PRD.md`, never writes it
-- [ ] `completedTaskFromDiff` reads the state file instead of the staged diff
-- [ ] `circon status` renders progress; the daily report reads the state file
+- [x] Move task completion out of `PRD.md` into `.circon/progress.json`
+- [x] Agent reads `PRD.md`, never writes it
+- [x] `completedTaskFromDiff` reads the state file instead of the staged diff
+- [x] `circon status` renders progress; the daily report reads the state file
 
 **This is the fix for mid-run PRD updates.** The conflict exists because both
 sides write the same file: the human edits the spec on `main`, the agent flips
@@ -178,10 +178,10 @@ genuinely dangerous.
 
 ## 5. Tell infrastructure failure apart from gate failure
 
-- [ ] Preflight each iteration: Ollama responding, model loaded, disk headroom
-- [ ] Classify known infra signatures in gate output (ECONNREFUSED, OOM, ENOSPC)
-- [ ] Infra failures do **not** count toward the circuit breaker
-- [ ] Retry with backoff instead; alert as "infrastructure", not "gate failed"
+- [x] Preflight each iteration: Ollama responding, model loaded, disk headroom
+- [x] Classify known infra signatures in gate output (ECONNREFUSED, OOM, ENOSPC)
+- [x] Infra failures do **not** count toward the circuit breaker
+- [x] Retry with backoff instead; alert as "infrastructure", not "gate failed"
 
 Today an Ollama OOM fails the gate, trips the breaker after three iterations,
 and reports "gate failure at the unit tests tier". The diagnosis is wrong and
@@ -191,12 +191,12 @@ three iterations were paid for to reach it.
 
 ## 6. Automatic cleanup
 
-- [ ] `circon gc`, run after each job and on the daily timer
-- [ ] Prune run logs older than 30 days
-- [ ] Delete local `circon/run-*` branches whose PR is merged or closed
-- [ ] Remove `.circon/*.log` from project working trees
-- [ ] `pnpm store prune` when the store exceeds a threshold
-- [ ] Report reclaimed space; refuse to run a job below a disk floor
+- [x] `circon gc`, run after each job and on the daily timer
+- [x] Prune run logs older than 30 days
+- [x] Delete local `circon/run-*` branches whose PR is merged or closed
+- [x] Remove `.circon/*.log` from project working trees
+- [x] `pnpm store prune` when the store exceeds a threshold
+- [x] Report reclaimed space; refuse to run a job below a disk floor
 
 Deliberately **not** pruned: Ollama models (a re-pull is gigabytes), Docker
 volumes, and anything inside a project's `node_modules` that pnpm still

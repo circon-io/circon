@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, appendFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { join, basename } from 'node:path'
+import { randomBytes } from 'node:crypto'
 import { run, which } from '../core/exec.ts'
 import { ui } from '../core/ui.ts'
 import { paths, projectPaths } from '../core/paths.ts'
@@ -7,26 +8,29 @@ import { readConfig } from '../core/config.ts'
 import { runGate } from '../agent/gate.ts'
 import { Repo } from '../agent/git.ts'
 import { acquireLock, releaseLock, stopRequested, clearStop } from '../agent/lock.ts'
-import { notify } from '../agent/notify.ts'
 import { runVerification } from '../agent/verify.ts'
 import { readConventions } from '../components/workspace.ts'
+import { RunBudget, parseAiderCost, usd } from '../agent/spend.ts'
+import { readTasks, openTasks, markComplete, inferCompletedTask, allComplete } from '../agent/progress.ts'
+import { preflight, classifyFailure, backoffMs } from '../agent/health.ts'
+import { captureScreenshots, existingScreenshots, openPullRequest, type RunSummary } from '../agent/review.ts'
+import { collect } from './gc.ts'
 
 const STUCK_LIMIT = 3
+const INFRA_RETRY_LIMIT = 5
 
 function elapsed(startedAt: number): string {
   const secs = Math.floor((Date.now() - startedAt) / 1000)
   return `${Math.floor(secs / 3600)}h ${Math.floor((secs % 3600) / 60)}m`
 }
 
-/** Lines the agent appended to progress.txt during this run — its own account. */
-function newNotes(cwd: string, startLines: number): string {
+function notesSince(cwd: string, startLines: number): string {
   const file = join(cwd, 'progress.txt')
   if (!existsSync(file)) return ''
   return readFileSync(file, 'utf8')
     .split('\n')
     .slice(startLines)
-    .filter((l) => l.trim() && !l.includes('ALL_TASKS_COMPLETE'))
-    .slice(-6)
+    .filter((l) => l.trim())
     .join('\n')
 }
 
@@ -41,14 +45,11 @@ export async function runCommand(maxLoops = 20): Promise<number> {
     return 1
   }
 
-  // Design before code — the PRD template ships these as marker comments.
-  // Both spellings are accepted so a PRD written before the rename still gates.
   const prdPath = join(cwd, 'PRD.md')
   const prdText = existsSync(prdPath) ? readFileSync(prdPath, 'utf8') : ''
   if (/(CIRCON|SOLYD)-UNFILLED/.test(prdText)) {
     ui.error('PRD.md still has unfilled design sections.')
     ui.info('Write the Design Principles and User Flows, then delete those comment blocks.')
-    ui.dim('Coding before they exist produces an app whose screens each invent their own design.')
     return 1
   }
 
@@ -71,17 +72,23 @@ export async function runCommand(maxLoops = 20): Promise<number> {
       return 1
     }
 
-    // Single pull point: bring in PRD and convention changes before anything
-    // starts, never mid-loop where it would race the agent's own commits.
+    // Money is checked before anything is spent, not after.
+    const budget = new RunBudget(project, cfg.budgetPerRunUsd, cfg.budgetPerDayUsd)
+    const blocked = budget.blockedBeforeStart()
+    if (blocked) {
+      ui.error(`Refusing to start — ${blocked}.`)
+      ui.dim('Raise budgetPerDayUsd in ~/.config/circon/config.json, or wait for tomorrow.')
+      return 1
+    }
+
+    // One branch per run: it maps 1:1 to a PR and therefore to a review
+    // decision, so an abandoned run is deleted without touching anything else.
     const base = await repo.defaultBranch()
     await repo.pullBase(base)
+    const branch = `circon/run-${new Date().toISOString().slice(0, 10)}-${randomBytes(3).toString('hex')}`
     try {
-      const { created, merged } = await repo.ensureWorkBranch(cfg.workBranch, base)
-      ui.info(
-        created
-          ? `Created work branch ${cfg.workBranch}`
-          : `On ${cfg.workBranch}${merged ? ` (merged ${base})` : ''}`,
-      )
+      await repo.createRunBranch(branch, base)
+      ui.info(`Working on ${branch} (from ${base})`)
     } catch (err) {
       ui.error(err instanceof Error ? err.message : String(err))
       return 1
@@ -91,11 +98,11 @@ export async function runCommand(maxLoops = 20): Promise<number> {
     const stamp = new Date().toISOString().replace(/[:.]/g, '-')
     const runLog = join(paths.logs, `${project}-${stamp}.log`)
     const startCommit = await repo.head()
+
     const progressFile = join(cwd, 'progress.txt')
     if (!existsSync(progressFile)) writeFileSync(progressFile, '')
-    const progressStart = readFileSync(progressFile, 'utf8').split('\n').length - 1
+    const notesStart = readFileSync(progressFile, 'utf8').split('\n').length - 1
 
-    // Read-only and prompt-cached, so the contract is not re-paid every loop.
     const conventionFiles: string[] = []
     if (readConventions()) {
       conventionFiles.push('--read', join(paths.conventions, 'ARCHITECTURE.md'))
@@ -104,35 +111,66 @@ export async function runCommand(maxLoops = 20): Promise<number> {
       conventionFiles.push('--read', projectPaths.conventions)
     }
 
+    const tasksAtStart = readTasks(cwd)
     ui.heading(`circon run — ${project}`)
-    ui.dim(`branch ${cfg.workBranch} · max ${maxLoops} iterations`)
+    ui.dim(`${tasksAtStart.filter((t) => !t.done).length} open tasks · max ${maxLoops} iterations`)
     ui.dim(`log ${runLog}`)
 
     const startedAt = Date.now()
+    const completed: ReturnType<typeof readTasks> = []
     let commits = 0
     let stuck = 0
+    let infraRetries = 0
     let lastFailure = ''
     let verifyNotes = ''
-    let allDone = false
-    let stopped = false
+    let gateTiers: string[] = []
+    let ended: 'complete' | 'stopped' | 'budget' | 'limit' = 'limit'
 
     for (let i = 1; i <= maxLoops; i++) {
-      // Checked between iterations only, so a stop never lands mid-commit.
       if (stopRequested()) {
-        stopped = true
+        ended = 'stopped'
         ui.warn('Stop requested — ending cleanly between iterations.')
         break
       }
 
+      const overspent = budget.exceeded()
+      if (overspent) {
+        ended = 'budget'
+        ui.warn(`Stopping — ${overspent}.`)
+        break
+      }
+
+      // Infrastructure is checked before the agent is paid to discover it.
+      const sick = await preflight(conventionFiles.length >= 0)
+      if (sick) {
+        if (!sick.transient || infraRetries >= INFRA_RETRY_LIMIT) {
+          ui.error(`Infrastructure problem: ${sick.what} — ${sick.detail}`)
+          return 1
+        }
+        infraRetries++
+        const wait = backoffMs(infraRetries)
+        ui.warn(`${sick.what}: ${sick.detail}. Retrying in ${wait / 1000}s…`)
+        await new Promise((r) => setTimeout(r, wait))
+        continue
+      }
+
       ui.heading(`Iteration ${i}/${maxLoops}`)
+      const openBefore = openTasks(cwd)
+      if (openBefore.length === 0) {
+        ended = 'complete'
+        break
+      }
 
       const prompt = [
-        'Pick the SINGLE highest-priority incomplete task from PRD.md. Implement ONLY that task.',
-        'Update PRD.md and progress.txt with your changes.',
-        "If all tasks are finished, append 'ALL_TASKS_COMPLETE' to progress.txt.",
+        `Implement ONLY this task: ${openBefore[0]?.text ?? 'the highest-priority open task'}`,
+        '',
+        'Do NOT edit PRD.md — it is the human-owned specification and circon tracks',
+        'completion separately. Record what you did in progress.txt, ending with a',
+        'line of the form:',
+        '  COMPLETED: <the exact task text>',
         '',
         'Follow ARCHITECTURE.md, loaded read-only in this session. It is the standing',
-        'engineering contract for every project here and overrides your own defaults.',
+        'engineering contract and overrides your own defaults.',
         lastFailure,
         verifyNotes,
       ]
@@ -143,7 +181,7 @@ export async function runCommand(maxLoops = 20): Promise<number> {
       const aiderRun = await run(
         aider,
         [
-          'PRD.md', 'progress.txt', ...conventionFiles,
+          'progress.txt', ...conventionFiles, '--read', 'PRD.md',
           '--architect',
           '--model', 'sonnet',
           '--editor-model', 'ollama_chat/qwen2.5-coder:7b',
@@ -153,22 +191,56 @@ export async function runCommand(maxLoops = 20): Promise<number> {
         ],
         { cwd, stream: true },
       )
-      appendFileSync(runLog, aiderRun.stdout + aiderRun.stderr)
+      const aiderOut = aiderRun.stdout + aiderRun.stderr
+      appendFileSync(runLog, aiderOut)
+
+      const cost = parseAiderCost(aiderOut)
+      if (cost !== null) budget.add('aider', cost)
 
       ui.step('Running the quality gate…')
       const gate = await runGate({ cwd })
       appendFileSync(runLog, gate.output)
-      if (gate.ranTiers.length) ui.dim(`tiers: ${gate.ranTiers.join(' → ')}`)
+      if (gate.ranTiers.length) {
+        gateTiers = gate.ranTiers
+        ui.dim(`tiers: ${gate.ranTiers.join(' → ')} · ${budget.summary()}`)
+      }
+
+      if (!gate.ok) {
+        // A broken machine is not the agent's fault, and reverting its work
+        // teaches it nothing — so this must not count toward the breaker.
+        const infra = classifyFailure(gate.output)
+        if (infra && infraRetries < INFRA_RETRY_LIMIT) {
+          infraRetries++
+          await repo.hardReset()
+          const wait = backoffMs(infraRetries)
+          ui.warn(`Infrastructure, not the code: ${infra.detail}. Retrying in ${wait / 1000}s…`)
+          appendFileSync(runLog, `\n[infrastructure] ${infra.detail}\n`)
+          await new Promise((r) => setTimeout(r, wait))
+          i--
+          continue
+        }
+      }
 
       if (gate.ok) {
         lastFailure = ''
+        infraRetries = 0
         await repo.stageAll()
+
         if (await repo.hasStagedChanges()) {
-          const task = await repo.completedTaskFromDiff()
-          await repo.commit(task ? `feat: ${task}` : `chore: iteration ${i}`)
+          const notes = notesSince(cwd, notesStart)
+          const task = inferCompletedTask(cwd, notes, openBefore)
+          await repo.commit(task ? `feat: ${task.text}` : `chore: iteration ${i}`)
+          const sha = await repo.head()
+          if (task) {
+            markComplete(cwd, task.text, sha ?? undefined)
+            completed.push({ ...task, done: true })
+            // The state file is part of the commit that completed the task.
+            await repo.stageAll()
+            if (await repo.hasStagedChanges()) await repo.commit(`chore: record ${task.text}`)
+          }
           commits++
           stuck = 0
-          ui.ok(task ? `Committed: ${task}` : `Committed iteration ${i}`)
+          ui.ok(task ? `Completed: ${task.text}` : `Committed iteration ${i}`)
         } else {
           ui.warn('No file changes this iteration.')
         }
@@ -178,77 +250,71 @@ export async function runCommand(maxLoops = 20): Promise<number> {
         lastFailure =
           `The previous attempt failed the ${gate.failedTier} gate:\n${gate.output.slice(-2000)}`
         stuck++
-
-        verifyNotes = await runVerification(cwd, `gate failure at the ${gate.failedTier} tier`)
+        verifyNotes = await runVerification(cwd, `gate failure at the ${gate.failedTier} tier`, budget)
 
         if (stuck >= STUCK_LIMIT) {
-          const work = (await repo.commitsSince(startCommit)).map((s) => `- ${s}`).join('\n')
-          await notify(
-            [
-              `🛑 circon HALTED: ${project}`,
-              `Circuit breaker after ${STUCK_LIMIT} consecutive failures.`,
-              `Failing tier: ${gate.failedTier}`,
-              `Stopped at iteration ${i}/${maxLoops} after ${elapsed(startedAt)}.`,
-              '', `Completed before the failure (${commits} commits):`, work,
-              '', 'Last agent notes:', newNotes(cwd, progressStart),
-              '', `Why it failed (${gate.failedTier}):`,
-              gate.output.split('\n').slice(-12).join('\n'),
-              '', `Full log: ${runLog}`,
-            ].join('\n'),
-          )
-          ui.error('Circuit breaker tripped. Halting.')
+          ui.error(`Circuit breaker: ${STUCK_LIMIT} consecutive gate failures. Halting.`)
+          ui.dim(budget.summary())
           return 1
         }
       }
 
-      if (readFileSync(progressFile, 'utf8').includes('ALL_TASKS_COMPLETE')) {
-        allDone = true
+      if (allComplete(cwd)) {
+        ended = 'complete'
         break
       }
 
       if (i % cfg.verifyEvery === 0 && gate.ok) {
-        verifyNotes = await runVerification(cwd, `scheduled review at iteration ${i}`)
+        verifyNotes = await runVerification(cwd, `scheduled review at iteration ${i}`, budget)
       }
     }
 
-    const pushed = await repo.push(cfg.workBranch)
-    const work = (await repo.commitsSince(startCommit)).map((s) => `- ${s}`).join('\n')
-    const notes = newNotes(cwd, progressStart)
-    const branchLine = pushed
-      ? `Branch: ${cfg.workBranch} (pushed)`
-      : `Branch: ${cfg.workBranch} (local only)`
-
-    if (allDone) {
-      await notify([
-        `🎉 circon FINISHED: ${project}`,
-        `All PRD tasks complete — ${commits} commits, ${elapsed(startedAt)}.`,
-        '', 'What got done:', work,
-        '', 'Last agent notes:', notes,
-        '', branchLine,
-      ].join('\n'))
-      ui.ok('All PRD tasks complete.')
-    } else if (stopped) {
-      await notify([
-        `⏹️ circon STOPPED: ${project}`,
-        `Stopped on request after ${commits} commits, ${elapsed(startedAt)}.`,
-        '', 'What got done:', work,
-        '', branchLine,
-      ].join('\n'))
-      ui.ok('Stopped cleanly.')
-    } else {
-      const open = (
-        (existsSync(prdPath) ? readFileSync(prdPath, 'utf8') : prdText).match(/^- \[ \]/gm) ?? []
-      ).length
-      await notify([
-        `⏸️ circon PAUSED: ${project}`,
-        `Hit the ${maxLoops} iteration limit — ${open} tasks still open.`,
-        `${commits} commits, ${elapsed(startedAt)}.`,
-        '', 'What got done:', work,
-        '', 'Last agent notes:', notes,
-        '', `Run circon again to continue. ${branchLine}`,
-      ].join('\n'))
-      ui.ok(`Reached the iteration limit. ${commits} commits.`)
+    // ---- wrap up -------------------------------------------------------------
+    const commitSubjects = await repo.commitsSince(startCommit)
+    if (commitSubjects.length === 0) {
+      ui.warn('No commits produced — nothing to review.')
+      ui.dim(budget.summary())
+      return 0
     }
+
+    const pushed = await repo.push(branch)
+    const screenshots = [...(await captureScreenshots(cwd)), ...existingScreenshots(cwd)]
+
+    const summary: RunSummary = {
+      project,
+      branch,
+      iterations: commits,
+      commits: commitSubjects,
+      tasksCompleted: completed,
+      tasksOpen: openTasks(cwd),
+      notes: notesSince(cwd, notesStart),
+      gateTiers,
+      costUsd: budget.total,
+      logPath: runLog,
+    }
+
+    let prUrl: string | null = null
+    if (pushed) {
+      const pr = await openPullRequest(cwd, repo, summary, screenshots, base)
+      prUrl = pr.url
+      if (!prUrl && pr.reason) ui.warn(`No PR opened: ${pr.reason}`)
+    }
+
+    ui.blank()
+    switch (ended) {
+      case 'complete': ui.ok('All PRD tasks complete.'); break
+      case 'stopped':  ui.ok('Stopped on request.'); break
+      case 'budget':   ui.warn('Stopped on budget.'); break
+      default:         ui.ok(`Reached the iteration limit.`)
+    }
+    ui.info(`${commits} commits · ${elapsed(startedAt)} · ${budget.summary()}`)
+    ui.info(`Branch ${branch}${pushed ? ' (pushed)' : ' (local only)'}`)
+    if (prUrl) ui.info(`Review: ${prUrl}`)
+
+    // Housekeeping while nothing else is running.
+    const reclaimed = await collect({ cwd })
+    if (reclaimed.length) ui.dim(`gc: tidied ${reclaimed.length} thing(s)`)
+
     return 0
   } finally {
     releaseLock()

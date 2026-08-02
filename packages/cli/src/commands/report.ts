@@ -3,7 +3,6 @@ import { join } from 'node:path'
 import { run, which } from '../core/exec.ts'
 import { ui } from '../core/ui.ts'
 import { paths } from '../core/paths.ts'
-import { notify } from '../agent/notify.ts'
 
 /**
  * The daily digest. Reports what was *built*, not just how many commits landed —
@@ -144,15 +143,8 @@ export async function reportCommand(opts: { stdout?: boolean } = {}): Promise<nu
   lines.push('', '🖥️ Machine', ...(await machineHealth()))
   const report = lines.join('\n')
 
-  if (opts.stdout) {
-    ui.info(report)
-    return 0
-  }
-
-  const sent = await notify(report)
-  if (!sent) {
-    ui.warn('Telegram not configured — printing instead.')
-    ui.info(report)
-  }
+  // Telegram was dropped in favour of the dashboard; until that exists the
+  // report is printed, and the systemd timer captures it into the journal.
+  ui.info(report)
   return 0
 }

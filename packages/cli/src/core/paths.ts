@@ -57,6 +57,7 @@ export const projectPaths = {
   androidAppId: join('.circon', 'android-app-id'),
   clientDir: join('.circon', 'client-dir'),
   lastVerified: join('.circon', '.last-verified'),
+  progress: join('.circon', 'progress.json'),
   conventions: join('.circon', 'ARCHITECTURE.md'),
 }
 

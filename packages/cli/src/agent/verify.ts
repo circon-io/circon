@@ -4,8 +4,8 @@ import { run, which } from '../core/exec.ts'
 import { readConfig } from '../core/config.ts'
 import { projectPaths, paths } from '../core/paths.ts'
 import { Repo } from './git.ts'
-import { notify } from './notify.ts'
 import { readConventions } from '../components/workspace.ts'
+import { parseClaudeCost, type RunBudget } from './spend.ts'
 
 const MAX_DIFF_LINES = 3000
 
@@ -16,15 +16,22 @@ const MAX_DIFF_LINES = 3000
  * Advisory by construction — it returns notes for the next prompt and never
  * fails the loop.
  */
-export async function runVerification(cwd: string, reason: string): Promise<string> {
-  const findings = await review(cwd, reason)
+export async function runVerification(
+  cwd: string,
+  reason: string,
+  budget?: RunBudget,
+): Promise<string> {
+  const findings = await review(cwd, reason, budget)
   if (!findings) return ''
 
-  await notify(`🔍 circon REVIEW\n${reason}\n\n${findings}`)
   return `A reviewer looked at your recent commits and found:\n${findings}\nAddress these before starting new work.`
 }
 
-export async function review(cwd: string, reason: string): Promise<string | null> {
+export async function review(
+  cwd: string,
+  reason: string,
+  budget?: RunBudget,
+): Promise<string | null> {
   if (!(await which('claude'))) return null
   if (!process.env['ANTHROPIC_API_KEY']) return null
 
@@ -76,6 +83,7 @@ ${diff}`
     '--permission-mode', 'plan',
     '--allowedTools', 'Read,Grep,Glob',
     '--max-budget-usd', String(cfg.verifyBudgetUsd),
+    '--output-format', 'json',
   ]
 
   // Hold the reviewer to the same contract the writer follows.
@@ -93,6 +101,10 @@ ${diff}`
 
   const result = await run('claude', args, { cwd, timeoutMs: 300_000 })
 
+  // Record what the review actually cost, not the cap it was allowed.
+  const spent = parseClaudeCost(result.stdout)
+  if (spent !== null) budget?.add('verify', spent)
+
   // Record the reviewed point regardless of outcome, so the next pass does not
   // re-review the same commits.
   const head = await repo.head()
@@ -101,7 +113,15 @@ ${diff}`
     writeFileSync(lastVerifiedPath, head)
   }
 
-  const output = result.stdout.trim()
+  let output = result.stdout.trim()
+  try {
+    const parsed = JSON.parse(output) as Record<string, unknown>
+    const text = parsed['result'] ?? parsed['text']
+    if (typeof text === 'string') output = text.trim()
+  } catch {
+    /* plain text output from an older CLI — use it as-is */
+  }
+
   if (!output) return null
   if (output.split('\n').some((l) => l.trim() === 'CLEAN')) return null
   return output
