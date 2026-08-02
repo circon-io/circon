@@ -55,18 +55,73 @@ Metro at runtime, so iteration does not cost a cloud build.
 
 ### Cloudflare control plane
 
-- [ ] `circon runner --token <t>` — register, heartbeat, accept jobs
+**Phase 1 — visibility**
+
+- [ ] `circon enroll --token <t>` — exchange a one-time token for a runner credential
 - [ ] Durable Object per runner: state, heartbeat, current job, log ring buffer
 - [ ] WebSocket log streaming, dashboard subscribes to the same DO
 - [ ] Next.js dashboard on Workers, Clerk auth, D1 for run history and cost
+
+**Phase 2 — configuration from the dashboard**
+
+- [ ] Per-runner config: which models, which gate tiers, which features
+- [ ] Org-level defaults that a runner can override
+- [ ] Secret distribution (Anthropic, Cloudflare, Clerk, Sentry, Telegram)
+- [ ] `circon run` pulls config at start, alongside conventions and the PRD
+- [ ] Encrypted local cache so an unreachable control plane never blocks a run
+- [ ] Per-runner revocation
 
 The GitLab-runner model, entirely on the existing stack. DO hibernation means
 idle runners cost nothing.
 
 Deferred until the CLI settles, because the runner protocol should not be
-designed against a moving target. The decision that keeps this small: conventions
-and PRDs live in GitHub, so the control plane stays a **view plus job
-dispatcher** and never becomes a file server.
+designed against a moving target.
+
+#### Configuration, and why phase 2 is a bigger step than it looks
+
+The goal is that a new machine needs one command — `circon enroll --token …` —
+and pulls everything else. That is right, and it is what makes runners
+disposable. But it changes what the control plane *is*.
+
+Phase 1 keeps it a **view plus job dispatcher**: conventions and PRDs live in
+GitHub, so it never holds anything that matters. Phase 2 makes it a
+**configuration and secret store**, which is a different security posture and
+should be built deliberately, not by accident.
+
+Two kinds of setting, and they should not be handled the same way:
+
+| | Examples | Where it can live |
+|---|---|---|
+| **Config** | architect/editor model, `verifyEvery`, enabled gate tiers, `iosRunnerMode`, conventions repo | D1, plain. Low blast radius. |
+| **Secrets** | `ANTHROPIC_API_KEY`, Cloudflare token, Clerk keys, Telegram bot token | Cloudflare Secrets Store bound to the Worker — never D1, never plain |
+
+Per-runner config is the genuinely useful part: the RTX 3060 box runs a local
+editor model, a laptop or the Mac mini runs cloud-only, and each advertises the
+gate tiers its hardware can actually serve. `iosRunnerMode` stops being hand-
+edited and becomes a property of the runner the dashboard already knows about.
+
+Four decisions to make before writing any of it:
+
+1. **Precedence.** Dashboard as source of truth with local `config.json` as
+   fallback, or local overrides win? Recommend dashboard wins, local is cache —
+   otherwise "why is this runner behaving differently" becomes unanswerable.
+2. **Offline behaviour.** A runner today works with no network beyond the model
+   APIs. If config lives remotely, an unreachable control plane must fall back
+   to the cached copy rather than refusing to run. Otherwise centralising
+   configuration turns a working machine into one that depends on a service
+   being up — a clear regression.
+3. **Pull timing.** Same single point as conventions and the PRD: run start,
+   never mid-loop. Keeps the invariant that a run's inputs cannot change under
+   it.
+4. **Enrolment vs runtime credential.** A short-lived one-time enrolment token
+   exchanged for a per-runner credential, so a compromised runner is revoked
+   alone. A single shared long-lived token is simpler and much worse.
+
+Secrets are the part to be conservative about. Distributing them means the
+control plane's blast radius becomes every credential on every runner — worth it
+for disposable runners, but it needs Secrets Store, TLS-only delivery,
+short-lived tokens, and an audit trail. `ARCHITECTURE.md` already mandates
+least-privilege Cloudflare tokens, which limits the damage if one leaks.
 
 ### Project scaffold — wire the real stack
 
@@ -83,11 +138,18 @@ Note on Fragment UI: 6 stars and self-described "Work in Progress", and it would
 own auth and billing screens. Keep it behind `packages/ui` so replacing it is a
 local change rather than a rewrite.
 
-### Release infrastructure for scaffolded projects
+### CI/CD shipped inside the boilerplate
 
-- [ ] Codemagic config for iOS dev builds and both platforms' store releases
-- [ ] GitHub Actions deploying web + Workers to Cloudflare
+- [ ] `.github/workflows/ci.yml` in the template — typecheck, test, gate tiers
+- [ ] `.github/workflows/deploy.yml` — web + Workers to Cloudflare
+- [ ] `codemagic.yaml` — iOS dev builds and both platforms' store releases
 - [ ] Changesets wired into the project template
+- [ ] `circon init` creates the GitHub repo and pushes, so CI exists from commit one
+
+The scaffold and its pipeline are **one deliverable**, not two: a boilerplate
+that arrives without CI gets a hand-rolled pipeline per project, which is
+exactly the drift `ARCHITECTURE.md` exists to prevent. Treat the workflows as
+part of the template.
 
 What exists today is release infrastructure for **the CLI itself**. Projects
 created by `circon init` have none.
@@ -96,6 +158,16 @@ The split decided earlier: Android dev builds run **locally** on the box (free,
 no queue, the SDK is already there); only iOS needs cloud. Codemagic's 500 free
 minutes/month covers the expected iOS volume, where EAS's 15-build cap would be
 consumed by development alone.
+
+Worth reusing rather than reinventing: this repo's own `ci.yml` already solves
+the shape — reusable via `workflow_call`, with the release gated on it through
+`needs:` so a publish can never outrun its checks. The project template should
+copy that structure.
+
+Once the control plane exists, the deploy credentials these workflows need
+(Cloudflare token, Codemagic key) are the same secrets phase 2 distributes — so
+`circon init` could register the repo and provision its CI secrets in one step
+rather than leaving a manual checklist behind.
 
 ### macOS as a first-class runner
 
