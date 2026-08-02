@@ -3,57 +3,107 @@
 Work that is designed but not built, with the reasoning that led to deferring
 it. Kept so the *why* survives — a bare task list loses the decision.
 
----
-
-## Half-built
-
-### Telegram inline keyboards
-
-- [ ] Attach `CONTROL_BUTTONS` to the notifications sent by `circon run`
-
-`circon listen` already handles the `Stop` / `Status` / `Last log` callbacks and
-`CONTROL_BUTTONS` is defined in `packages/cli/src/agent/notify.ts`, but no
-message ever passes it — every `notify()` call in `commands/run.ts` omits the
-options argument, so there is nothing to press. Roughly ten lines.
-
-This was chosen as the "fleet control now" answer ahead of a dashboard, so it
-should land before anything in the control-plane section below.
+Ordered by what should happen first.
 
 ---
 
-## Deferred by decision
+## 0. Prove the loop
 
-### iOS feedback — Loop 3
+- [ ] One real `circon run` on a throwaway project, end to end
 
-- [ ] Choose the runner (device or Mac mini)
-- [ ] Implement the chosen `iosRunnerMode` and its `.circon/flows/ios.sh`
+Everything below assumes aider plus a 7B local editor can reliably finish a PRD
+task and that the accessibility gate catches real regressions. Neither has been
+observed once. Until it has, the rest of this list is building on an unverified
+premise — the control plane would be a window onto nothing.
 
-Shipped as a stub: `iosRunnerMode: 'none'` in `~/.config/circon/config.json`,
-with the gate's ios tier already wired to read it. Web and Android feedback need
-no Apple hardware, so this waits until they prove insufficient.
+---
 
-**The constraint, so it is not re-derived:** the iOS Simulator is macOS-only.
-Headless does not reduce rendering — it skips a window, not GPU work. A QEMU
-macOS VM has no Metal and never touches the NVIDIA GPU. Apple has a documented
-open issue with the Simulator inside macOS VMs. baguette is Apple Silicon only
-while Docker-OSX emulates Intel, so they are mutually exclusive, and Xcode 27
-begins dropping Intel.
+## 1. Spend control
 
-Two viable paths, both researched:
+- [ ] `budget.perRun` and `budget.perDay` in config, dashboard-editable
+- [ ] Parse aider's per-message cost line; accumulate per run
+- [ ] Add the verify pass and any cloud build to the same ledger
+- [ ] **Hard stop** when a cap is hit, mid-run, not a warning after the fact
+- [ ] Spend ledger at `~/.local/state/circon/spend.json`, rolling per day
+- [ ] Cost per run in the daily report and in the PR body
+- [ ] Refuse to start a run that would exceed the daily cap
 
-| Mode | How | Cost | Catch |
-|---|---|---|---|
-| `device` | EAS builds a dev-client IPA → `go-ios` installs it from Linux → Metro serves JS over LAN → WebDriverAgent exposes the accessibility hierarchy | ~€100 phone + Apple Developer account | UDID must be registered **before** the build; one device per concurrent agent |
-| `mac` | Apple Silicon Mac running baguette as a headless simulator farm, driven over SSH | ~$599 M4 mini | needs the machine |
+Correctness has a circuit breaker; spend has nothing. `verifyBudgetUsd` caps one
+review pass at $0.50 and that is the only limit anywhere.
 
-Recommendation when it matters: the Mac mini. baguette is a *farm*, so one Mac
-serves N agents where N iPhones serve N. It also becomes the fastlane signing
-machine.
+The gap that matters: the breaker trips on **three consecutive gate failures**,
+so a loop that passes its gate every time while producing mediocre work runs all
+20 iterations at full price. Multiply by N runners taking jobs from a dashboard.
 
-Only the native shell needs rebuilding — a dev-client build loads its JS from
-Metro at runtime, so iteration does not cost a cloud build.
+A daily cap needs to be machine-wide rather than per-run, or twenty small runs
+cost the same as one runaway.
 
-### Cloudflare control plane
+---
+
+## 2. Projects, branches, review and release
+
+The runner currently has no idea what a project is — `circon run` operates on
+`process.cwd()`. Dispatching a job from a dashboard needs all of this.
+
+### Workspace
+
+- [ ] Clone to `~/circon-projects/<org>__<repo>`, one directory per project
+- [ ] `circon job <project-slug>` — clone or pull, then run
+- [ ] Pull `main` before each run; never touch the working tree of another job
+
+A dashboard project *is* a connected GitHub repository, so the slug is already
+`<organization>__<repository>`. That becomes the directory name, and the runner
+never has to guess where anything lives.
+
+### Branch per run, not a long-lived work branch
+
+- [ ] Replace `circon/work` with `circon/run-<date>-<shortid>`
+- [ ] Delete the branch when its PR merges or the run is abandoned
+
+`circon/work` accumulates unrelated work and can never be partially accepted.
+One branch per run maps 1:1 to a PR and therefore 1:1 to a review decision:
+abandoned runs are deleted without touching anything else, and conflicts stay
+bounded to a single run's changes.
+
+### The review artefact
+
+- [ ] Open a PR automatically when a run finishes with commits
+- [ ] Generate the body: tasks done, agent notes, gate results per tier, cost
+- [ ] Capture a screenshot per screen at the end of a green run, attach to the PR
+- [ ] Link the PR to its dashboard run view, and the run view back to the PR
+
+**Accessibility trees are for the machine; screenshots are for the human.** The
+gate must keep asserting on the tree — pixels are the wrong thing to fail a
+build on. But a reviewer deciding whether this is worth shipping wants to see
+it, and `agent-device` already has a `screenshot` command. Capture them once,
+after the gate is green, purely as a review artefact.
+
+### Two approval gates
+
+```
+run ──▶ PR ──▶ [gate 1: merge]  ──▶ main
+                                     └──▶ version PR ──▶ [gate 2: release] ──▶ prod
+```
+
+- [ ] Gate 1 — merging the PR means "this code is accepted"
+- [ ] Gate 2 — merging the Changesets version PR triggers the actual release
+- [ ] Release report in the dashboard: changelog, screenshots, gate results,
+      Codemagic dev-build link, cost
+- [ ] Approving the release report merges the version PR
+
+Two gates because they answer different questions. Gate 1 is "is this code
+correct" and belongs on the PR, next to the diff. Gate 2 is "should this go to
+users now" and belongs to whoever owns the product — they should be able to
+approve a changelog, look at screenshots and install a dev build without reading
+a diff. The changeset flow already produces the changelog; the dashboard just
+needs to render it as a report with an approve button.
+
+For mobile, the dev build is the artefact that makes gate 2 real: Codemagic
+builds the PR, the reviewer installs it, then approves.
+
+---
+
+## 3. Cloudflare control plane
 
 **Phase 1 — visibility**
 
@@ -62,12 +112,11 @@ Metro at runtime, so iteration does not cost a cloud build.
 - [ ] WebSocket log streaming, dashboard subscribes to the same DO
 - [ ] Next.js dashboard on Workers, Clerk auth, D1 for run history and cost
 
-**Phase 2 — configuration and PRDs from the dashboard**
+**Phase 2 — configuration, PRDs and secrets**
 
-- [ ] Per-runner config: which models, which gate tiers, which features
-- [ ] Org-level defaults that a runner can override
-- [ ] Secret distribution (Anthropic, Cloudflare, Clerk, Sentry, Telegram)
-- [ ] PRD editing in the dashboard, committed to GitHub via a GitHub App
+- [ ] Per-runner config: models, gate tiers, budgets, features
+- [ ] Org-level defaults a runner can override
+- [ ] PRD editing in the dashboard, written through to GitHub via a GitHub App
 - [ ] Push config and PRD changes to a running runner over its existing socket
 - [ ] Apply them at the **next iteration boundary**, never mid-iteration
 - [ ] Encrypted local cache so an unreachable control plane never blocks a run
@@ -76,130 +125,113 @@ Metro at runtime, so iteration does not cost a cloud build.
 **Phase 3 — runners as daemons**
 
 - [ ] `circon agent` — long-lived process, connects to its DO, heartbeats, waits
-- [ ] systemd unit (Linux) and launchd agent (macOS), enabled at boot
+- [ ] systemd unit enabled at boot, restart with backoff
 - [ ] Start / stop / queue a job from the dashboard
-- [ ] Restart with backoff; survive control-plane outages without dying
+- [ ] Survive control-plane outages without dying or losing the current job
 - [ ] Reuse the existing run lock so a dispatched job cannot race a manual one
 
-The GitLab-runner model, entirely on the existing stack. DO hibernation means
-idle runners cost nothing.
+DO hibernation means idle runners cost nothing. Deferred until the CLI settles,
+because the runner protocol should not be designed against a moving target.
 
-Deferred until the CLI settles, because the runner protocol should not be
-designed against a moving target.
+### Secret scoping
 
-#### Configuration, and why phase 2 is a bigger step than it looks
+Two scopes, because a runner works on many projects and
+`ARCHITECTURE.md` mandates Cloudflare tokens scoped to a single project:
 
-The goal is that a new machine needs one command — `circon enroll --token …` —
-and pulls everything else. That is right, and it is what makes runners
-disposable. But it changes what the control plane *is*.
-
-Phase 1 keeps it a **view plus job dispatcher**: conventions and PRDs live in
-GitHub, so it never holds anything that matters. Phase 2 makes it a
-**configuration and secret store**, which is a different security posture and
-should be built deliberately, not by accident.
-
-Two kinds of setting, and they should not be handled the same way:
-
-| | Examples | Where it can live |
+| Scope | Examples | Lifetime |
 |---|---|---|
-| **Config** | architect/editor model, `verifyEvery`, enabled gate tiers, `iosRunnerMode`, conventions repo | D1, plain. Low blast radius. |
-| **Secrets** | `ANTHROPIC_API_KEY`, Cloudflare token, Clerk keys, Telegram bot token | Cloudflare Secrets Store bound to the Worker — never D1, never plain |
+| **Machine** | `ANTHROPIC_API_KEY` | held by the runner, rotated centrally |
+| **Project** | Cloudflare token, Clerk keys, Sentry DSN | fetched at job start, held only for that job |
 
-Per-runner config is the genuinely useful part: the RTX 3060 box runs a local
-editor model, a laptop or the Mac mini runs cloud-only, and each advertises the
-gate tiers its hardware can actually serve. `iosRunnerMode` stops being hand-
-edited and becomes a property of the runner the dashboard already knows about.
+- [ ] Store both in Cloudflare Secrets Store, never in D1
+- [ ] Runner requests project secrets for the job it was dispatched, nothing else
+- [ ] Drop project secrets from memory and disk when the job ends
+- [ ] Rotation: change centrally, runners pick it up at the next job
 
-Four decisions to make before writing any of it:
+Distributing secrets makes the control plane's blast radius every credential on
+every runner. Per-project scoping is what keeps a compromised runner from
+becoming a compromised estate.
 
-1. **Precedence.** Dashboard as source of truth with local `config.json` as
-   fallback, or local overrides win? Recommend dashboard wins, local is cache —
-   otherwise "why is this runner behaving differently" becomes unanswerable.
-2. **Offline behaviour.** A runner today works with no network beyond the model
-   APIs. If config lives remotely, an unreachable control plane must fall back
-   to the cached copy rather than refusing to run. Otherwise centralising
-   configuration turns a working machine into one that depends on a service
-   being up — a clear regression.
-3. **Where the PRD actually lives.** The dashboard should be an *editor*, not
-   the store: it writes through to GitHub with a GitHub App. That keeps history,
-   PR review and offline access, and stops the control plane becoming a file
-   server that needs its own conflict resolution. A runner still reads the PRD
-   from the repo — the dashboard just saves you opening an editor.
-4. **Enrolment vs runtime credential.** A short-lived one-time enrolment token
-   exchanged for a per-runner credential, so a compromised runner is revoked
-   alone. A single shared long-lived token is simpler and much worse.
+---
 
-#### Live updates: reconciling with the "no mid-loop pull" rule
+## 4. Stop the agent editing the human's file
 
-Updating a running runner's PRD and config **contradicts an invariant the CLI
-was built around**, so it needs stating rather than quietly reversing.
+- [ ] Move task completion out of `PRD.md` into `.circon/progress.json`
+- [ ] Agent reads `PRD.md`, never writes it
+- [ ] `completedTaskFromDiff` reads the state file instead of the staged diff
+- [ ] `circon status` renders progress; the daily report reads the state file
 
-Today conventions and the PRD are fetched once at run start and never again,
-because pulling while the agent is mid-edit races its own commits: aider writes
-to a file that changed underneath it, `git reset --hard` on a failed gate throws
-away the wrong thing, and the task the agent is working on can vanish.
+**This is the fix for mid-run PRD updates.** The conflict exists because both
+sides write the same file: the human edits the spec on `main`, the agent flips
+`- [ ]` to `- [x]` on the run branch. Merging `main` mid-run then conflicts on
+exactly the lines both touched.
 
-The resolution is that **"live" should mean the next iteration boundary, not
-mid-write**. The loop already pauses between iterations to check the stop flag —
-that same point is where a pushed config or PRD update gets applied. In practice
-that is seconds to minutes, which is what "update it while it runs" actually
-needs, and it keeps every guarantee:
+If `PRD.md` is written by one side only, merging it is always clean, and a live
+PRD update becomes a fast-forward of a file the agent never touches.
 
-- no file changes underneath a running aider process
-- the gate's revert still only ever discards the agent's own work
-- an iteration's inputs are fixed for its whole duration, so a failure is
-  reproducible
+Trade-off, stated honestly: `PRD.md` stops showing progress at a glance. That
+view moves to `circon status` and the dashboard. Worth it — the alternative is
+conflict resolution inside an autonomous loop, which is where this design gets
+genuinely dangerous.
 
-Mechanism: the runner already holds a WebSocket to its Durable Object for log
-streaming, so the control plane pushes a "config changed" / "PRD changed" event
-and the runner applies it at the next boundary. No polling, and no separate
-transport.
+---
 
-One case still needs a decision: an update that lands while the agent is
-mid-task on something the update deletes. Options are finish the iteration then
-re-plan, or abort and revert immediately. Recommend finishing — an aborted
-iteration wastes the tokens already spent and leaves progress notes describing
-work that was thrown away.
+## 5. Tell infrastructure failure apart from gate failure
 
-Secrets are the part to be conservative about. Distributing them means the
-control plane's blast radius becomes every credential on every runner — worth it
-for disposable runners, but it needs Secrets Store, TLS-only delivery,
-short-lived tokens, and an audit trail. `ARCHITECTURE.md` already mandates
-least-privilege Cloudflare tokens, which limits the damage if one leaks.
+- [ ] Preflight each iteration: Ollama responding, model loaded, disk headroom
+- [ ] Classify known infra signatures in gate output (ECONNREFUSED, OOM, ENOSPC)
+- [ ] Infra failures do **not** count toward the circuit breaker
+- [ ] Retry with backoff instead; alert as "infrastructure", not "gate failed"
 
-### Pin conventions to what the runner actually has
+Today an Ollama OOM fails the gate, trips the breaker after three iterations,
+and reports "gate failure at the unit tests tier". The diagnosis is wrong and
+three iterations were paid for to reach it.
+
+---
+
+## 6. Automatic cleanup
+
+- [ ] `circon gc`, run after each job and on the daily timer
+- [ ] Prune run logs older than 30 days
+- [ ] Delete local `circon/run-*` branches whose PR is merged or closed
+- [ ] Remove `.circon/*.log` from project working trees
+- [ ] `pnpm store prune` when the store exceeds a threshold
+- [ ] Report reclaimed space; refuse to run a job below a disk floor
+
+Deliberately **not** pruned: Ollama models (a re-pull is gigabytes), Docker
+volumes, and anything inside a project's `node_modules` that pnpm still
+references. Only things that are cheap to recreate.
+
+The box was at 94% full before any of this existed, and nothing currently
+deletes anything.
+
+---
+
+## 7. Pin conventions to what the runner has
 
 - [ ] Version the conventions repo (git tags, semver)
 - [ ] `@circon/cli` declares the convention range it supports
-- [ ] Runner pulls the newest conventions **within** that range, not just `HEAD`
+- [ ] Runner resolves the newest conventions **within** that range, not `HEAD`
 - [ ] `circon doctor` reports conventions requiring tooling that is not installed
-- [ ] Dashboard shows each runner's CLI version and resolved convention version
+- [ ] Dashboard shows each runner's CLI and resolved convention version
 
-`ARCHITECTURE.md` states things like which package manager, which Expo SDK and
-which Node version to build against. Nothing today checks that against the
-machine, so a convention edit can instruct the agent to use tooling the runner
-does not have — and the failure surfaces as a confusing gate error several
-iterations later, not as "your conventions and your machine disagree".
-
-The fix is to treat conventions as a versioned dependency of the CLI rather than
-a floating pointer:
+`ARCHITECTURE.md` states which package manager, Expo SDK and Node version to
+build against. Nothing checks that against the machine, so a convention edit can
+instruct the agent to use tooling the runner does not have — surfacing as a
+confusing gate error several iterations later rather than "your conventions and
+your machine disagree".
 
 ```
 conventions v3  ── requires ──▶  cli >= 0.4   (pnpm 10, Node 24, Expo 57)
 conventions v4  ── requires ──▶  cli >= 0.6   (Expo 58)
 ```
 
-A runner on CLI 0.4 keeps resolving to conventions v3 and stays internally
-consistent. Upgrading the conventions to require new tooling then forces a
-deliberate `npm update -g @circon/cli && circon setup --upgrade`, instead of
-silently instructing an agent to use something that is not there.
+Same pinned-versus-floating discipline the component model already applies to
+the machine, extended to the contract the agent follows.
 
-This is the same discipline the component model already applies to the machine —
-pinned versus floating, and never an implicit upgrade — extended to the contract
-the agent follows. It is worth doing even without a control plane; the dashboard
-just makes the mismatch visible across a fleet.
+---
 
-### Project scaffold — wire the real stack
+## 8. Project scaffold — wire the real stack
 
 - [ ] `apps/web` — Next.js on Cloudflare via `@opennextjs/cloudflare`, HeroUI, Fragment UI
 - [ ] `apps/mobile` — Expo with HeroUI Native
@@ -210,11 +242,13 @@ just makes the mismatch visible across a fleet.
 `circon init` currently produces an empty monorepo shell plus the gate flows.
 `ARCHITECTURE.md` already specifies all of the above; nothing generates it.
 
-Note on Fragment UI: 6 stars and self-described "Work in Progress", and it would
+Fragment UI is at 6 stars and self-described "Work in Progress", and it would
 own auth and billing screens. Keep it behind `packages/ui` so replacing it is a
 local change rather than a rewrite.
 
-### CI/CD shipped inside the boilerplate
+---
+
+## 9. CI/CD shipped inside the boilerplate
 
 - [ ] `.github/workflows/ci.yml` in the template — typecheck, test, gate tiers
 - [ ] `.github/workflows/deploy.yml` — web + Workers to Cloudflare
@@ -222,75 +256,88 @@ local change rather than a rewrite.
 - [ ] Changesets wired into the project template
 - [ ] `circon init` creates the GitHub repo and pushes, so CI exists from commit one
 
-The scaffold and its pipeline are **one deliverable**, not two: a boilerplate
-that arrives without CI gets a hand-rolled pipeline per project, which is
-exactly the drift `ARCHITECTURE.md` exists to prevent. Treat the workflows as
-part of the template.
+The scaffold and its pipeline are **one deliverable**. A boilerplate that
+arrives without CI gets a hand-rolled pipeline per project, which is exactly the
+drift `ARCHITECTURE.md` exists to prevent.
 
-What exists today is release infrastructure for **the CLI itself**. Projects
-created by `circon init` have none.
+Android dev builds run **locally** on the box (free, no queue, the SDK is
+already there); only iOS needs cloud. Codemagic's 500 free minutes/month covers
+the expected iOS volume, where EAS's 15-build cap would be consumed by
+development alone.
 
-The split decided earlier: Android dev builds run **locally** on the box (free,
-no queue, the SDK is already there); only iOS needs cloud. Codemagic's 500 free
-minutes/month covers the expected iOS volume, where EAS's 15-build cap would be
-consumed by development alone.
+Reuse this repo's own `ci.yml` shape — reusable via `workflow_call`, release
+gated through `needs:` so a publish cannot outrun its checks.
 
-Worth reusing rather than reinventing: this repo's own `ci.yml` already solves
-the shape — reusable via `workflow_call`, with the release gated on it through
-`needs:` so a publish can never outrun its checks. The project template should
-copy that structure.
+---
 
-Once the control plane exists, the deploy credentials these workflows need
-(Cloudflare token, Codemagic key) are the same secrets phase 2 distributes — so
-`circon init` could register the repo and provision its CI secrets in one step
-rather than leaving a manual checklist behind.
-
-### macOS as a first-class runner
-
-- [ ] Give `Component` per-platform install strategies instead of `linuxOnly`
-- [ ] `brew-base` alongside `apt-base`; Node and aider via Homebrew on darwin
-- [ ] Ollama on macOS (Metal, no CUDA path) and the Android SDK mac tarball
-- [ ] launchd agent instead of the systemd `--user` timer for the daily report
-- [ ] Screen Sharing / VNC instead of GNOME Remote Desktop
-- [ ] Lift the `uname -s` guard in `init.sh`, or ship a `bootstrap-macos.sh`
-
-**7 of 19 components already work anywhere** — `node`, `js-globals`, `aider`,
-`workspace`, `conventions`, `shell-env`, `git-identity`. `doctor` runs cleanly
-on macOS today and reports the rest as *skipped*. So this is filling gaps, not
-a rewrite.
-
-The 12 that need a darwin path:
-
-| Component | macOS equivalent |
-|---|---|
-| `apt-base` | Homebrew formulae |
-| `nvidia`, `kvm`, `sysctl` | **not applicable** — Metal replaces CUDA, no KVM, kqueue has no inotify limit |
-| `docker` | Docker Desktop or colima |
-| `ollama`, `ollama-model` | native installer; `ollama-tuning` is a no-op (flash attention is a Linux systemd override) |
-| `android-studio`, `android-sdk` | both exist for macOS; the cmdline-tools URL is `commandlinetools-mac-*` |
-| `ssh` | Remote Login via `systemsetup` |
-| `daily-report` | launchd plist, not systemd |
-
-`Component.linuxOnly` is the wrong shape for this — it should become something
-like `platforms: ['linux', 'darwin']` with the install body branching, or
-platform-specific variants selected in the registry. Worth deciding before more
-components are written against the current flag.
-
-**Why this matters more than it looks:** macOS support and the Mac mini in the
-iOS section are the *same purchase*. If the Mac runs circon natively, Loop 3
-stops being an SSH-orchestrated appliance and becomes a local gate tier — no
-`go-ios`, no remote transport, no `mac` mode at all. A second runner that also
-happens to be the only machine that can build and test iOS.
-
-It would also let the loop run on the laptop, without RDP into the Ubuntu box.
-
-### Credentials and context7
+## 10. Credentials and context7
 
 - [ ] `circon config` prompts for GitHub, Clerk, Cloudflare and Sentry tokens
-- [ ] Guidance or tooling for least-privilege Cloudflare tokens
+- [ ] Guidance or tooling for least-privilege, per-project Cloudflare tokens
 - [ ] Install context7 MCP so agents get current docs for fast-moving betas
 
-`ARCHITECTURE.md` mandates Cloudflare tokens scoped to a single account and only
-that project's resources — with nothing to produce them. context7 matters
-because the stack leans on packages that move fast (HeroUI Native is at 1.0
-beta), where training data goes stale.
+context7 matters because the stack leans on packages that move fast (HeroUI
+Native is at 1.0 beta), where training data goes stale.
+
+---
+
+## 11. iOS feedback — Loop 3
+
+- [ ] Buy the phone or the Mac, then implement that `iosRunnerMode`
+- [ ] `.circon/flows/ios.sh`
+
+Shipped as a stub: `iosRunnerMode: 'none'`, with the gate's ios tier already
+wired to read it. Web and Android need no Apple hardware, so this waits.
+
+**The constraint, so it is not re-derived:** the iOS Simulator is macOS-only.
+Headless does not reduce rendering — it skips a window, not GPU work. A QEMU
+macOS VM has no Metal and never touches the NVIDIA GPU. Apple has a documented
+open issue with the Simulator inside macOS VMs. baguette is Apple Silicon only
+while Docker-OSX emulates Intel, so they are mutually exclusive, and Xcode 27
+begins dropping Intel.
+
+| Mode | How | Cost | Catch |
+|---|---|---|---|
+| `device` | EAS builds a dev-client IPA → `go-ios` installs it from Linux → Metro serves JS over LAN → WebDriverAgent exposes the hierarchy | ~€100 phone + Apple Developer account | UDID registered **before** the build; one device per concurrent agent |
+| `mac` | Apple Silicon Mac running baguette as a headless simulator farm, over SSH | ~$599 M4 mini | needs the machine, and see below |
+
+Only the native shell needs rebuilding — a dev-client build loads its JS from
+Metro at runtime, so iteration does not cost a cloud build.
+
+**`device` is the one to build.** Ubuntu-only is the target, and `mac` mode
+means writing an SSH transport that macOS runner support (v2) would immediately
+make redundant. If a Mac is ever bought, run circon on it natively and iOS
+becomes a local gate tier with no transport at all.
+
+---
+
+## v2 — nice to have
+
+### macOS as a runner
+
+- [ ] `Component` gains per-platform strategies instead of `linuxOnly`
+- [ ] Homebrew base, Ollama on Metal, Android SDK mac tarball
+- [ ] launchd instead of systemd; Screen Sharing instead of GNOME RDP
+
+7 of 19 components already work anywhere, and `doctor` runs cleanly on macOS
+today, reporting the rest as *skipped*. Not urgent — Ubuntu is the target — but
+`Component.linuxOnly` is the wrong shape and is worth replacing before many more
+components are written against it.
+
+If it ever lands it collapses the iOS `mac` mode entirely: a Mac running circon
+natively tests iOS locally, with no SSH orchestration.
+
+---
+
+## Decided against
+
+**Docker.** Not the right axis. NVIDIA kernel modules, KVM, the Android emulator
+and USB all need host hardware access, which is the point of this machine. The
+agent runtime needs adb, the emulator, the GPU and the project tree — a
+container with all of that mounted is a worse chroot. For reproducible
+*machines* the tool is cloud-init or Ansible. Only Ollama would benefit.
+
+**Telegram.** Dropped in favour of the dashboard. Notifications and the
+`circon listen` control daemon both go; the dashboard is the single place to see
+runs and control them, and maintaining two control surfaces means neither is
+trusted.
