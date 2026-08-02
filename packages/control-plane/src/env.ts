@@ -9,9 +9,15 @@ export interface Env {
   ENROLL_TOKEN_TTL_MINUTES?: string
   DASHBOARD_ORIGIN?: string
 
+  // Stripe price ids differ between test and live mode, so they are vars.
+  STRIPE_PRICE_PRO?: string
+
   // secrets, set by the deploy workflow
   CLERK_JWKS_URL?: string
+  CLERK_SECRET_KEY?: string
   RUNNER_SECRET_PEPPER?: string
+  STRIPE_SECRET_KEY?: string
+  STRIPE_WEBHOOK_SECRET?: string
 }
 
 export function json(body: unknown, status = 200): Response {

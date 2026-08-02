@@ -16,6 +16,8 @@ export interface Principal {
   kind: 'human' | 'runner'
   id: string
   org: string
+  /** Present for humans, so Stripe checkout can prefill it. */
+  email?: string
 }
 
 let jwks: ReturnType<typeof createRemoteJWKSet> | null = null
@@ -82,7 +84,8 @@ export async function authenticateHuman(request: Request, env: Env): Promise<Pri
     // Clerk puts the active organisation in `org_id`; fall back to the user so
     // a personal account still has a stable tenant key.
     const org = typeof payload['org_id'] === 'string' ? payload['org_id'] : sub
-    return { kind: 'human', id: sub, org }
+    const email = typeof payload['email'] === 'string' ? payload['email'] : undefined
+    return { kind: 'human', id: sub, org, ...(email ? { email } : {}) }
   } catch {
     return null
   }

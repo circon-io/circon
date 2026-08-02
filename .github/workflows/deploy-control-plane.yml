@@ -65,15 +65,22 @@ jobs:
               echo "  skipped $1 (not provided)"
             fi
           }
-          put CLERK_JWKS_URL       "${{ secrets.CLERK_JWKS_URL }}"
-          put RUNNER_SECRET_PEPPER "${{ secrets.RUNNER_SECRET_PEPPER }}"
+          put CLERK_JWKS_URL        "${{ secrets.CLERK_JWKS_URL }}"
+          put CLERK_SECRET_KEY      "${{ secrets.CLERK_SECRET_KEY }}"
+          put RUNNER_SECRET_PEPPER  "${{ secrets.RUNNER_SECRET_PEPPER }}"
+          put STRIPE_SECRET_KEY     "${{ secrets.STRIPE_SECRET_KEY }}"
+          put STRIPE_WEBHOOK_SECRET "${{ secrets.STRIPE_WEBHOOK_SECRET }}"
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
 
       - name: Deploy
         working-directory: packages/control-plane
-        run: npx wrangler deploy --var CLERK_ISSUER:"${{ vars.CLERK_ISSUER }}"
+        run: |
+          npx wrangler deploy \
+            --var CLERK_ISSUER:"${{ vars.CLERK_ISSUER }}" \
+            --var DASHBOARD_ORIGIN:"${{ vars.DASHBOARD_ORIGIN }}" \
+            --var STRIPE_PRICE_PRO:"${{ vars.STRIPE_PRICE_PRO }}"
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}

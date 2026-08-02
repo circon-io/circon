@@ -35,10 +35,16 @@
     "ENROLL_TOKEN_TTL_MINUTES": "30",
     // The dashboard Worker's origin. Only this origin may call the API from a
     // browser; runners use bearer tokens and are unaffected by CORS.
-    "DASHBOARD_ORIGIN": ""
+    "DASHBOARD_ORIGIN": "",
+    // Stripe price id for the Pro plan. Test and live mode differ, so this is
+    // set per environment rather than hard-coded in plans.ts.
+    "STRIPE_PRICE_PRO": ""
   }
 
   // Secrets, set by the deploy workflow with `wrangler secret put`:
   //   CLERK_JWKS_URL          verify dashboard sessions
+  //   CLERK_SECRET_KEY        read and write org billing metadata
   //   RUNNER_SECRET_PEPPER    peppers runner-token hashes
+  //   STRIPE_SECRET_KEY       create checkout and portal sessions
+  //   STRIPE_WEBHOOK_SECRET   verify webhook signatures
 }

@@ -7,6 +7,7 @@ import { RunnerCard } from '@/components/runner-card'
 import { EnrolRunner } from '@/components/enrol-runner'
 import { QueueJob } from '@/components/queue-job'
 import { RunsTable } from '@/components/runs-table'
+import { BillingCard } from '@/components/billing-card'
 import { money, useApi, type Run, type Runner } from '@/lib/api'
 
 export default function DashboardPage() {
@@ -83,6 +84,8 @@ export default function DashboardPage() {
           ))
         )}
       </section>
+
+      <BillingCard />
 
       <div className="grid gap-4 md:grid-cols-2">
         <EnrolRunner onEnrolled={() => void refresh()} />

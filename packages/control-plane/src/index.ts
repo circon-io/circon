@@ -1,8 +1,11 @@
-import { type Env, fail, ok, id, nowIso } from './env.ts'
+import { type Env, fail, ok, json, id, nowIso } from './env.ts'
 import {
   authenticateHuman, authenticateRunner, hashToken, newToken, unauthorized, forbidden,
 } from './auth.ts'
 import { RunnerDO } from './runner-do.ts'
+import { canEnrolRunner, canQueueJob, entitlementFor, countRunners } from './billing/entitlements.ts'
+import { createCheckout, createPortal, handleWebhook } from './billing/stripe.ts'
+import { publicPlans, isPlanId } from './billing/plans.ts'
 
 export { RunnerDO }
 
@@ -64,6 +67,12 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         return await enroll(request, env)
       }
 
+      // Stripe cannot present a Clerk session, so the signature is the
+      // authentication. Verified inside handleWebhook before anything is read.
+      if (path === '/api/webhooks/stripe' && request.method === 'POST') {
+        return await handleWebhook(request, env)
+      }
+
       if (path === '/api/runner/socket') {
         const principal = await authenticateRunner(request, env)
         if (!principal) return unauthorized('Runner token rejected')
@@ -106,6 +115,27 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         }
         if (path === '/api/jobs' && request.method === 'POST') {
           return await queueJob(request, env, principal.org, principal.id)
+        }
+        if (path === '/api/billing' && request.method === 'GET') {
+          return await billingSummary(env, principal.org)
+        }
+        if (path === '/api/billing/checkout' && request.method === 'POST') {
+          const body = (await request.json().catch(() => ({}))) as {
+            plan?: string
+            returnTo?: string
+          }
+          if (!isPlanId(body.plan)) return fail('invalid_input', 'Unknown plan.')
+          return await createCheckout(
+            env,
+            principal.org,
+            principal.email,
+            body.plan,
+            body.returnTo ?? env.DASHBOARD_ORIGIN ?? '',
+          )
+        }
+        if (path === '/api/billing/portal' && request.method === 'POST') {
+          const body = (await request.json().catch(() => ({}))) as { returnTo?: string }
+          return await createPortal(env, principal.org, body.returnTo ?? env.DASHBOARD_ORIGIN ?? '')
         }
         if (path.startsWith('/api/runners/') && path.endsWith('/logs')) {
           const runnerId = path.split('/')[3] ?? ''
@@ -188,6 +218,25 @@ async function enroll(request: Request, env: Env): Promise<Response> {
   if (invite.used_at) return fail('token_used', 'That enrolment token has already been used.', 409)
   if (Date.parse(invite.expires_at) < Date.now()) {
     return fail('token_expired', 'That enrolment token has expired.', 410)
+  }
+
+  // The plan limit, checked before the invite is consumed so a refused
+  // enrolment does not burn the token.
+  const allowance = await canEnrolRunner(env, invite.org)
+  if (!allowance.allowed) {
+    return json(
+      {
+        ok: false,
+        error: {
+          code: 'runner_limit_reached',
+          message: allowance.reason ?? 'Runner limit reached.',
+          used: allowance.used,
+          limit: allowance.limit,
+          upgradeTo: allowance.upgradeTo,
+        },
+      },
+      402,
+    )
   }
 
   const runnerId = id('run')
@@ -315,6 +364,23 @@ async function queueJob(
 
   if (!body?.projectSlug) return fail('invalid_input', 'projectSlug is required.')
 
+  const allowance = await canQueueJob(env, org)
+  if (!allowance.allowed) {
+    return json(
+      {
+        ok: false,
+        error: {
+          code: 'queue_limit_reached',
+          message: allowance.reason ?? 'Queue limit reached.',
+          used: allowance.used,
+          limit: allowance.limit,
+          upgradeTo: allowance.upgradeTo,
+        },
+      },
+      402,
+    )
+  }
+
   const jobId = id('job')
   await env.DB.prepare(
     `INSERT INTO jobs (id, org, project_slug, max_loops, requested_by, created_at)
@@ -396,4 +462,18 @@ async function listRuns(env: Env, org: string, url: URL): Promise<Response> {
     .first<{ total: number }>()
 
   return ok({ runs: rows.results ?? [], spentLast24h: spend?.total ?? 0 })
+}
+
+async function billingSummary(env: Env, org: string): Promise<Response> {
+  const { plan, tag, limits } = await entitlementFor(env, org)
+  const runners = await countRunners(env, org)
+
+  return ok({
+    plan: { id: plan.id, name: plan.name, priceLabel: plan.priceLabel },
+    status: tag.status ?? 'active',
+    limits,
+    usage: { runners },
+    hasSubscription: Boolean(tag.stripeCustomerId),
+    plans: publicPlans(),
+  })
 }
