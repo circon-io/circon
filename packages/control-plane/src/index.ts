@@ -1,6 +1,7 @@
 import { type Env, fail, ok, json, id, nowIso } from './env.ts'
 import {
-  authenticateHuman, authenticateRunner, hashToken, newToken, unauthorized, forbidden,
+  authenticateHumanDetailed, authenticateRunner, hashToken, newToken,
+  authFailureResponse, unauthorized, forbidden,
 } from './auth.ts'
 import { RunnerDO } from './runner-do.ts'
 import { canEnrollRunner, canQueueJob, entitlementFor, countRunners } from './billing/entitlements.ts'
@@ -101,8 +102,9 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       // ---- dashboard endpoints ---------------------------------------------
 
       if (path.startsWith('/api/')) {
-        const principal = await authenticateHuman(request, env)
-        if (!principal) return unauthorized('Sign in to continue')
+        const auth = await authenticateHumanDetailed(request, env)
+        if (!auth.principal) return authFailureResponse(auth)
+        const principal = auth.principal
 
         if (path === '/api/runners' && request.method === 'GET') {
           return await listRunners(env, principal.org)
