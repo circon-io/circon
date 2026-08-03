@@ -51,29 +51,6 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
 
-      # Secrets are pushed rather than committed. `secret put` is idempotent, so
-      # rotating a value in GitHub and re-running is the whole rotation story.
-      - name: Sync secrets
-        working-directory: packages/control-plane
-        run: |
-          set -euo pipefail
-          put() {
-            if [ -n "${2:-}" ]; then
-              printf '%s' "$2" | npx wrangler secret put "$1"
-              echo "  set $1"
-            else
-              echo "  skipped $1 (not provided)"
-            fi
-          }
-          put CLERK_JWKS_URL        "${{ secrets.CLERK_JWKS_URL }}"
-          put CLERK_SECRET_KEY      "${{ secrets.CLERK_SECRET_KEY }}"
-          put RUNNER_SECRET_PEPPER  "${{ secrets.RUNNER_SECRET_PEPPER }}"
-          put STRIPE_SECRET_KEY     "${{ secrets.STRIPE_SECRET_KEY }}"
-          put STRIPE_WEBHOOK_SECRET "${{ secrets.STRIPE_WEBHOOK_SECRET }}"
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
-
       - name: Deploy
         working-directory: packages/control-plane
         run: |
@@ -86,6 +63,45 @@ jobs:
             --var CLERK_ISSUER:"${{ vars.CLERK_ISSUER }}" \
             --var DASHBOARD_ORIGIN:"${{ vars.DASHBOARD_ORIGIN }}" \
             --var STRIPE_PRICE_PRO:"${{ vars.STRIPE_PRICE_PRO }}"
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+
+      # After the deploy, not before: `wrangler secret put` targets an existing
+      # Worker, so on a first run there is nothing to attach a secret to.
+      # `secret put` publishes a new version, so the values take effect at once.
+      - name: Sync secrets
+        working-directory: packages/control-plane
+        run: |
+          set -euo pipefail
+
+          # Required: the API cannot authenticate anyone without these, and a
+          # silently skipped one shows up much later as "not configured" in the
+          # dashboard. Fail here instead.
+          require() {
+            if [ -z "${2:-}" ]; then
+              echo "::error::$1 is required but the repository secret is empty or unset."
+              exit 1
+            fi
+            printf '%s' "$2" | npx wrangler secret put "$1"
+            echo "  set $1"
+          }
+
+          # Optional: billing simply stays switched off until these exist.
+          optional() {
+            if [ -n "${2:-}" ]; then
+              printf '%s' "$2" | npx wrangler secret put "$1"
+              echo "  set $1"
+            else
+              echo "::warning::$1 is not set — billing endpoints will return 503."
+            fi
+          }
+
+          require  CLERK_JWKS_URL        "${{ secrets.CLERK_JWKS_URL }}"
+          require  CLERK_SECRET_KEY      "${{ secrets.CLERK_SECRET_KEY }}"
+          require  RUNNER_SECRET_PEPPER  "${{ secrets.RUNNER_SECRET_PEPPER }}"
+          optional STRIPE_SECRET_KEY     "${{ secrets.STRIPE_SECRET_KEY }}"
+          optional STRIPE_WEBHOOK_SECRET "${{ secrets.STRIPE_WEBHOOK_SECRET }}"
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}

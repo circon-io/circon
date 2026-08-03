@@ -25,6 +25,11 @@ the dashboard to provide one.
 
 `GITHUB_TOKEN` is injected automatically. **Do not create one.**
 
+`CLERK_JWKS_URL`, `CLERK_SECRET_KEY` and `RUNNER_SECRET_PEPPER` are **required** —
+the deploy fails loudly if any is empty, rather than shipping a Worker that
+answers every request with "not configured". The two Stripe secrets are optional;
+without them the billing endpoints return 503 and everything else works.
+
 There is deliberately **no `NPM_TOKEN`** — npm publishing uses OIDC trusted
 publishing (step 6).
 
