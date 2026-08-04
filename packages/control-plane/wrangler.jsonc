@@ -37,6 +37,8 @@
   ],
 
   "vars": {
+    // A well-known endpoint serving public keys — public by design, so a var.
+    "CLERK_JWKS_URL": "",
     "CLERK_ISSUER": "",
     "ENROLL_TOKEN_TTL_MINUTES": "30",
     // The dashboard Worker's origin. Only this origin may call the API from a
@@ -48,7 +50,6 @@
   }
 
   // Secrets, set by the deploy workflow with `wrangler secret put`:
-  //   CLERK_JWKS_URL          verify dashboard sessions
   //   CLERK_SECRET_KEY        read and write org billing metadata
   //   RUNNER_SECRET_PEPPER    peppers runner-token hashes
   //   STRIPE_SECRET_KEY       create checkout and portal sessions

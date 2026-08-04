@@ -17,7 +17,6 @@ the dashboard to provide one.
 | Secret | Where to get it |
 |---|---|
 | `CLOUDFLARE_API_TOKEN` | Cloudflare → My Profile → API Tokens → **Create Custom Token**. Three permissions only — see [Cloudflare API token](#cloudflare-api-token) below. Never a Global API Key. |
-| `CLERK_JWKS_URL` | `https://<your-clerk-domain>/.well-known/jwks.json` — Clerk → Configure → API Keys → Show JWT public key |
 | `CLERK_SECRET_KEY` | Clerk → API Keys → Secret key (`sk_live_…`) |
 | `RUNNER_SECRET_PEPPER` | Generate yourself: `openssl rand -hex 32`. Peppers runner-token hashes; **changing it invalidates every enrolled runner**, so treat it as permanent. |
 | `STRIPE_SECRET_KEY` | Stripe → Developers → API keys → Secret key (`sk_live_…`) |
@@ -25,7 +24,7 @@ the dashboard to provide one.
 
 `GITHUB_TOKEN` is injected automatically. **Do not create one.**
 
-`CLERK_JWKS_URL`, `CLERK_SECRET_KEY` and `RUNNER_SECRET_PEPPER` are **required** —
+`CLERK_SECRET_KEY` and `RUNNER_SECRET_PEPPER` are **required** —
 the deploy fails loudly if any is empty, rather than shipping a Worker that
 answers every request with "not configured". The two Stripe secrets are optional;
 without them the billing endpoints return 503 and everything else works.
@@ -43,7 +42,8 @@ keys and account ids belong here, not in secrets, so they can be diffed.
 | Variable | Value |
 |---|---|
 | `CLOUDFLARE_ACCOUNT_ID` | Cloudflare → Workers & Pages → Account ID |
-| `CLERK_ISSUER` | `https://<your-clerk-domain>` |
+| `CLERK_JWKS_URL` | `https://<your-clerk-frontend-api>/.well-known/jwks.json` — Clerk → Configure → API Keys → Show JWT public key. **A variable, not a secret**: it is a well-known endpoint serving public keys. |
+| `CLERK_ISSUER` | The origin of that same host, no path |
 | `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Clerk → API Keys → Publishable key (`pk_live_…`) |
 | `STRIPE_PRICE_PRO` | The Pro price id from step 5 (`price_…`) |
 | `CONTROL_PLANE_DOMAIN` | Hostname for the API Worker, e.g. `api.circon.io`. Zone must be on Cloudflare. |
@@ -190,9 +190,9 @@ rather than reaching for the template.
 
 ```
 [ ] GitHub environment `production` with required reviewers
-[ ] 6 secrets  (CLOUDFLARE_API_TOKEN, CLERK_JWKS_URL, CLERK_SECRET_KEY,
-                RUNNER_SECRET_PEPPER, STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET)
-[ ] 8 variables (CLOUDFLARE_ACCOUNT_ID, CLERK_ISSUER,
+[ ] 5 secrets  (CLOUDFLARE_API_TOKEN, CLERK_SECRET_KEY, RUNNER_SECRET_PEPPER,
+                STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET)
+[ ] 9 variables (CLOUDFLARE_ACCOUNT_ID, CLERK_JWKS_URL, CLERK_ISSUER,
                  NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY, STRIPE_PRICE_PRO,
                  CONTROL_PLANE_DOMAIN, DASHBOARD_DOMAIN,
                  CONTROL_PLANE_URL, DASHBOARD_ORIGIN)

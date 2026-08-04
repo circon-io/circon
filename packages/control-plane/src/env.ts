@@ -5,6 +5,8 @@ export interface Env {
   RUNNER: DurableObjectNamespace<RunnerDO>
 
   // vars
+  /** Public by design: a well-known endpoint serving public keys. */
+  CLERK_JWKS_URL?: string
   CLERK_ISSUER?: string
   ENROLL_TOKEN_TTL_MINUTES?: string
   DASHBOARD_ORIGIN?: string
@@ -13,7 +15,6 @@ export interface Env {
   STRIPE_PRICE_PRO?: string
 
   // secrets, set by the deploy workflow
-  CLERK_JWKS_URL?: string
   CLERK_SECRET_KEY?: string
   RUNNER_SECRET_PEPPER?: string
   STRIPE_SECRET_KEY?: string

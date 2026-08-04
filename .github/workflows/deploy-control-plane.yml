@@ -58,8 +58,15 @@ jobs:
           # --domain attaches the Worker to a hostname on a zone you control.
           # Without it, and with workers_dev false, wrangler has nowhere to put
           # the Worker and fails asking for a workers.dev subdomain.
+          # CLERK_JWKS_URL is a var, not a secret: it is a well-known endpoint
+          # serving public keys. Nothing about it needs hiding.
+          if [ -z "${{ vars.CLERK_JWKS_URL }}" ]; then
+            echo "::error::CLERK_JWKS_URL variable is required — the API cannot verify sessions without it."
+            exit 1
+          fi
           npx wrangler deploy \
             --domain "${{ vars.CONTROL_PLANE_DOMAIN }}" \
+            --var CLERK_JWKS_URL:"${{ vars.CLERK_JWKS_URL }}" \
             --var CLERK_ISSUER:"${{ vars.CLERK_ISSUER }}" \
             --var DASHBOARD_ORIGIN:"${{ vars.DASHBOARD_ORIGIN }}" \
             --var STRIPE_PRICE_PRO:"${{ vars.STRIPE_PRICE_PRO }}"
@@ -97,7 +104,6 @@ jobs:
             fi
           }
 
-          require  CLERK_JWKS_URL        "${{ secrets.CLERK_JWKS_URL }}"
           require  CLERK_SECRET_KEY      "${{ secrets.CLERK_SECRET_KEY }}"
           require  RUNNER_SECRET_PEPPER  "${{ secrets.RUNNER_SECRET_PEPPER }}"
           optional STRIPE_SECRET_KEY     "${{ secrets.STRIPE_SECRET_KEY }}"
