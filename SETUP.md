@@ -111,7 +111,14 @@ A project *is* a connected repository, so nothing works until this exists. A
 GitHub App rather than OAuth or a personal access token: grants are
 per-repository, tokens last an hour, and revoking access is uninstalling.
 
-**Settings → Developer settings → GitHub Apps → New GitHub App**
+Create it **in the organization**, not under a personal account:
+
+**`circon-io` → Settings → Developer settings → GitHub Apps → New GitHub App**
+
+The owner is not cosmetic. A personally-owned App ties its private key, webhook
+secret and every installation to one person's account; an org-owned one can be
+rotated or repaired by any org owner. Transferring later is possible but not
+something to do to a live App with other people's installations on it.
 
 | Field | Value |
 |---|---|
@@ -121,7 +128,16 @@ per-repository, tokens last an hour, and revoking access is uninstalling.
 | Request user authorization on install | off |
 | Webhook URL | `<CONTROL_PLANE_URL>/api/webhooks/github` |
 | Webhook secret | The `GITHUB_WEBHOOK_SECRET` you generated |
-| Where can it be installed | Any account, or only yours — your call |
+| Where can this GitHub App be installed | **Any account** |
+
+**Any account** is the one field to get right first time. "Only on this account"
+limits installs to `circon-io`'s own repositories, so Connect GitHub works for you
+and for nobody else — and it is awkward to change once installations exist.
+
+Make a **second App under your personal account for development**. Callback and
+webhook URLs are per-App, so without one you end up repointing production at a
+tunnel every time you test the install flow. The dev App can stay "Only on this
+account".
 
 **Repository permissions** — only these four:
 
