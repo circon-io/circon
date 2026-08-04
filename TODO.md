@@ -40,6 +40,36 @@ cost the same as one runaway.
 
 ---
 
+## 1.5 GitHub connection — the missing foundation
+
+- [ ] GitHub App: manifest, registration, private key as a secret
+- [ ] "Connect GitHub" in the dashboard → App install → store `installation_id` per org
+- [ ] `installation` / `installation_repositories` webhooks keep the grant current
+- [ ] Repo picker in the dashboard, listing repos the installation can see
+- [ ] Write the chosen repo into the `projects` table (currently **never written**)
+- [ ] `GET /api/runner/clone-token` — mint a short-lived, repo-scoped install token
+- [ ] Runner clones over HTTPS with that token instead of relying on its SSH key
+- [ ] Open the review PR with the same token, dropping the `gh` CLI dependency
+
+**This was assumed solved and never built.** TODO said "a dashboard project *is*
+a connected GitHub repository" as though the connection existed. It does not:
+
+- the `projects` table is created by migration `0001` and **never read or
+  written** — a dead table
+- there is **no GitHub integration of any kind** — no App, no OAuth, no token
+- `circon job` clones `git@github.com:org/repo.git`, so it only works where the
+  runner's SSH key was manually authorized by hand. A dashboard-dispatched job
+  against any other repo simply fails to clone.
+- `QueueJob` takes a hand-typed slug with no check that the repo exists
+
+A **GitHub App** is the right mechanism rather than OAuth or a PAT: grants are
+per-repository, tokens are short-lived and installation-scoped, and revoking is
+uninstalling. It also removes two current hacks — pre-authorized SSH keys, and
+`gh auth` on the runner for PR creation.
+
+Sequencing note: this blocks the dispatch story end to end, so it comes before
+anything in the control-plane section that assumes a project exists.
+
 ## 2. Projects, branches, review and release
 
 The runner currently has no idea what a project is — `circon run` operates on
@@ -67,7 +97,7 @@ bounded to a single run's changes.
 
 ### The review artifact
 
-- [x] Open a PR automatically when a run finishes with commits
+- [x] Open a PR automatically when a run finishes with commits (via `gh`; move to the App token)
 - [x] Generate the body: tasks done, agent notes, gate results per tier, cost
 - [x] Capture a screenshot per screen at the end of a green run, attach to the PR
 - [ ] Link the PR to its dashboard run view, and the run view back to the PR
@@ -124,6 +154,9 @@ builds the PR, the reviewer installs it, then approves.
 
 **Phase 3 — runners as daemons**
 
+*Not started. `circon agent` exists as a command but nothing installs it as a
+service, so a runner never comes back after a reboot.*
+
 - [ ] `circon agent` — long-lived process, connects to its DO, heartbeats, waits
 - [ ] systemd unit enabled at boot, restart with backoff
 - [ ] Start / stop / queue a job from the dashboard
@@ -153,6 +186,17 @@ every runner. Per-project scoping is what keeps a compromised runner from
 becoming a compromised estate.
 
 ---
+
+## 3.5 Wire the loop back to the control plane
+
+- [ ] `run.ts` calls `reportRun()` at start and at every exit path
+- [ ] Stream log lines to the runner's Durable Object during a run
+- [ ] Send `run-started` / `run-finished` so the dashboard status is live
+
+`reportRun()` and `POST /api/runner/run` both exist and are **never called**, so
+the dashboard's run history and 24-hour cost figure stay permanently empty even
+with a runner enrolled and working. Perhaps twenty lines, and the single highest
+ratio of visible result to effort left on this list.
 
 ## 4. Stop the agent editing the human's file
 
