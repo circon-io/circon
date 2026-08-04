@@ -56,8 +56,8 @@ function limitResponse(decision: Awaited<ReturnType<typeof canAddProject>>): Res
 
 /** Where to send the browser to install the App. */
 export function githubInstallUrl(env: Env, principal: Principal): Response {
-  if (!env.GITHUB_APP_SLUG) {
-    return fail('not_configured', 'GITHUB_APP_SLUG is not set on the API Worker.', 503)
+  if (!env.GH_APP_SLUG) {
+    return fail('not_configured', 'GH_APP_SLUG is not set on the API Worker.', 503)
   }
   // `state` carries the org through the redirect, so the callback knows who
   // installed it without trusting anything the browser sends back.
@@ -289,13 +289,13 @@ export async function runnerPullRequest(
  * the body is not parsed until it verifies.
  */
 export async function githubWebhook(request: Request, env: Env): Promise<Response> {
-  if (!env.GITHUB_WEBHOOK_SECRET) {
-    return fail('not_configured', 'GITHUB_WEBHOOK_SECRET is not set.', 503)
+  if (!env.GH_WEBHOOK_SECRET) {
+    return fail('not_configured', 'GH_WEBHOOK_SECRET is not set.', 503)
   }
 
   const raw = await request.text()
   const valid = await verifyWebhook(
-    env.GITHUB_WEBHOOK_SECRET,
+    env.GH_WEBHOOK_SECRET,
     raw,
     request.headers.get('x-hub-signature-256'),
   )

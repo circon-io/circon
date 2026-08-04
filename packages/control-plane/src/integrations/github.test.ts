@@ -55,7 +55,7 @@ describe('PEM parsing', () => {
 })
 
 describe('app JWT', () => {
-  const env = { GITHUB_APP_ID: '12345', GITHUB_APP_PRIVATE_KEY: privateKey } as never
+  const env = { GH_APP_ID: '12345', GH_APP_PRIVATE_KEY: privateKey } as never
 
   test('produces three base64url segments', async () => {
     const jwt = await appJwt(env)
@@ -101,16 +101,16 @@ describe('app JWT', () => {
 
   test('a PKCS#1 key fails with an actionable message', async () => {
     await assert.rejects(
-      () => appJwt({ GITHUB_APP_ID: '1', GITHUB_APP_PRIVATE_KEY: pkcs1Key } as never),
+      () => appJwt({ GH_APP_ID: '1', GH_APP_PRIVATE_KEY: pkcs1Key } as never),
       /PKCS#1.*openssl pkcs8/s,
     )
   })
 
   test('missing configuration is named', async () => {
-    await assert.rejects(() => appJwt({} as never), /GITHUB_APP_ID/)
+    await assert.rejects(() => appJwt({} as never), /GH_APP_ID/)
     await assert.rejects(
-      () => appJwt({ GITHUB_APP_ID: '1' } as never),
-      /GITHUB_APP_PRIVATE_KEY/,
+      () => appJwt({ GH_APP_ID: '1' } as never),
+      /GH_APP_PRIVATE_KEY/,
     )
   })
 })

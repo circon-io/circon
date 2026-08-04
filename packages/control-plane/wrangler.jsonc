@@ -49,8 +49,8 @@
     "STRIPE_PRICE_PRO": "",
     // GitHub App identity. Public: the id appears in every JWT, the slug in the
     // install URL. The private key is a secret.
-    "GITHUB_APP_ID": "",
-    "GITHUB_APP_SLUG": ""
+    "GH_APP_ID": "",
+    "GH_APP_SLUG": ""
   }
 
   // Secrets, set by the deploy workflow with `wrangler secret put`:
@@ -58,6 +58,6 @@
   //   RUNNER_SECRET_PEPPER    peppers runner-token hashes
   //   STRIPE_SECRET_KEY       create checkout and portal sessions
   //   STRIPE_WEBHOOK_SECRET   verify webhook signatures
-  //   GITHUB_APP_PRIVATE_KEY  sign App JWTs (PKCS#8 PEM)
-  //   GITHUB_WEBHOOK_SECRET   verify GitHub webhook signatures
+  //   GH_APP_PRIVATE_KEY  sign App JWTs (PKCS#8 PEM)
+  //   GH_WEBHOOK_SECRET   verify GitHub webhook signatures
 }

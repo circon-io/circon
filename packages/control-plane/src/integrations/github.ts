@@ -58,7 +58,7 @@ async function signingKey(pem: string): Promise<CryptoKey> {
   const { der, format } = pemToDer(pem)
   if (format === 'pkcs1') {
     throw new Error(
-      'GITHUB_APP_PRIVATE_KEY is in PKCS#1 format, which WebCrypto cannot import. ' +
+      'GH_APP_PRIVATE_KEY is in PKCS#1 format, which WebCrypto cannot import. ' +
         'Convert it once with: openssl pkcs8 -topk8 -inform PEM -outform PEM -nocrypt -in key.pem',
     )
   }
@@ -78,20 +78,20 @@ async function signingKey(pem: string): Promise<CryptoKey> {
  * the future, and a Worker's clock can be marginally ahead of theirs.
  */
 export async function appJwt(env: Env): Promise<string> {
-  if (!env.GITHUB_APP_ID) throw new Error('GITHUB_APP_ID is not set')
-  if (!env.GITHUB_APP_PRIVATE_KEY) throw new Error('GITHUB_APP_PRIVATE_KEY is not set')
+  if (!env.GH_APP_ID) throw new Error('GH_APP_ID is not set')
+  if (!env.GH_APP_PRIVATE_KEY) throw new Error('GH_APP_PRIVATE_KEY is not set')
 
   const now = Math.floor(Date.now() / 1000)
   const header = base64url(new TextEncoder().encode(JSON.stringify({ alg: 'RS256', typ: 'JWT' })))
   const payload = base64url(
     new TextEncoder().encode(
-      JSON.stringify({ iat: now - 60, exp: now + 540, iss: env.GITHUB_APP_ID }),
+      JSON.stringify({ iat: now - 60, exp: now + 540, iss: env.GH_APP_ID }),
     ),
   )
 
   const signature = await crypto.subtle.sign(
     'RSASSA-PKCS1-v1_5',
-    await signingKey(env.GITHUB_APP_PRIVATE_KEY),
+    await signingKey(env.GH_APP_PRIVATE_KEY),
     new TextEncoder().encode(`${header}.${payload}`),
   )
   return `${header}.${payload}.${base64url(signature)}`
@@ -242,6 +242,6 @@ export async function verifyWebhook(
 }
 
 export function installUrl(env: Env, state: string): string {
-  const slug = env.GITHUB_APP_SLUG ?? ''
+  const slug = env.GH_APP_SLUG ?? ''
   return `https://github.com/apps/${slug}/installations/new?state=${encodeURIComponent(state)}`
 }

@@ -21,15 +21,23 @@ the dashboard to provide one.
 | `RUNNER_SECRET_PEPPER` | Generate yourself: `openssl rand -hex 32`. Peppers runner-token hashes; **changing it invalidates every enrolled runner**, so treat it as permanent. |
 | `STRIPE_SECRET_KEY` | Stripe → Developers → API keys → Secret key (`sk_live_…`) |
 | `STRIPE_WEBHOOK_SECRET` | Created in step 5 below (`whsec_…`) |
-| `GITHUB_APP_PRIVATE_KEY` | Created in step 6 below. Paste the whole PEM including the BEGIN/END lines. **Must be PKCS#8** — see step 6. |
-| `GITHUB_WEBHOOK_SECRET` | Generate yourself: `openssl rand -hex 32`. Also entered in the App's settings. |
+| `GH_APP_PRIVATE_KEY` | Created in step 6 below. Paste the whole PEM including the BEGIN/END lines. **Must be PKCS#8** — see step 6. |
+| `GH_WEBHOOK_SECRET` | Generate yourself: `openssl rand -hex 32`. Also entered in the App's settings. |
 
 `GITHUB_TOKEN` is injected automatically. **Do not create one.**
 
+The GitHub App settings are prefixed `GH_`, not `GITHUB_`, because Actions
+reserves the `GITHUB_` prefix — creating `GITHUB_APP_ID` is rejected with *"Secret
+names must not start with GITHUB_"*. It applies to variables too. The Worker reads
+the same `GH_` names, so there is one name per setting rather than a mapping in
+the workflow.
+
 `CLERK_SECRET_KEY` and `RUNNER_SECRET_PEPPER` are **required** —
 the deploy fails loudly if any is empty, rather than shipping a Worker that
-answers every request with "not configured". The two Stripe secrets are optional;
-without them the billing endpoints return 503 and everything else works.
+answers every request with "not configured". The rest are optional, and the deploy
+says which feature each one leaves switched off: without the Stripe pair the
+billing endpoints return 503, and without the `GH_` pair no project can be
+connected — so the dashboard signs in and then cannot do anything useful.
 
 There is deliberately **no `NPM_TOKEN`** — npm publishing uses OIDC trusted
 publishing (step 6).
@@ -48,8 +56,8 @@ keys and account ids belong here, not in secrets, so they can be diffed.
 | `CLERK_ISSUER` | The origin of that same host, no path |
 | `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Clerk → API Keys → Publishable key (`pk_live_…`) |
 | `STRIPE_PRICE_PRO` | The Pro price id from step 5 (`price_…`) |
-| `GITHUB_APP_ID` | The numeric App ID from step 6 |
-| `GITHUB_APP_SLUG` | The App's URL slug from step 6, e.g. `circon-agent`. Builds the install link. |
+| `GH_APP_ID` | The numeric App ID from step 6 |
+| `GH_APP_SLUG` | The App's URL slug from step 6, e.g. `circon`. Builds the install link. |
 | `CONTROL_PLANE_DOMAIN` | Hostname for the API Worker, e.g. `api.circon.io`. Zone must be on Cloudflare. |
 | `DASHBOARD_DOMAIN` | Hostname for the dashboard, e.g. `app.circon.io` |
 | `CONTROL_PLANE_URL` | `https://<CONTROL_PLANE_DOMAIN>` |
@@ -122,12 +130,12 @@ something to do to a live App with other people's installations on it.
 
 | Field | Value |
 |---|---|
-| Name | `circon`. Its slug goes in `GITHUB_APP_SLUG` — see below. |
+| Name | `circon`. Its slug goes in `GH_APP_SLUG` — see below. |
 | Homepage URL | `<DASHBOARD_ORIGIN>` |
 | Callback URL | `<CONTROL_PLANE_URL>/api/integrations/github/callback` |
 | Request user authorization on install | off |
 | Webhook URL | `<CONTROL_PLANE_URL>/api/webhooks/github` |
-| Webhook secret | The `GITHUB_WEBHOOK_SECRET` you generated |
+| Webhook secret | The `GH_WEBHOOK_SECRET` you generated |
 | Where can this GitHub App be installed | **Any account** |
 
 **Any account** is the one field to get right first time. "Only on this account"
@@ -140,7 +148,7 @@ The **name** matters more than it looks. It becomes the slug, and the slug becom
 the bot identity: every pull request the agent opens is authored by
 `<slug>[bot]`, in every connected repository, permanently. It is also the install
 URL the dashboard sends people to. Renaming later works and installations survive,
-but the slug moves with it, so `GITHUB_APP_SLUG` has to be updated or Connect
+but the slug moves with it, so `GH_APP_SLUG` has to be updated or Connect
 GitHub starts 404ing. Names are unique across all of GitHub, 34 characters max,
 and may not contain the word "GitHub".
 
@@ -163,7 +171,7 @@ uninstall or a repository being deselected. Nothing else is read.
 
 Then, on the App's page:
 
-1. Copy the **App ID** into the `GITHUB_APP_ID` variable.
+1. Copy the **App ID** into the `GH_APP_ID` variable.
 2. **Generate a private key** and download the `.pem`.
 3. **Convert it.** GitHub issues PKCS#1 (`BEGIN RSA PRIVATE KEY`); WebCrypto in
    Workers only imports PKCS#8. The API detects this and says so, but convert it
@@ -175,7 +183,7 @@ Then, on the App's page:
    ```
 
    The result starts `-----BEGIN PRIVATE KEY-----`. Paste that whole file into
-   `GITHUB_APP_PRIVATE_KEY`.
+   `GH_APP_PRIVATE_KEY`.
 
 Users install the App themselves from the dashboard — **Connect GitHub** — and
 choose which repositories it may see. Each repository they then connect becomes a
@@ -273,10 +281,10 @@ rather than reaching for the template.
 [ ] GitHub environment `production` with required reviewers
 [ ] 7 secrets  (CLOUDFLARE_API_TOKEN, CLERK_SECRET_KEY, RUNNER_SECRET_PEPPER,
                 STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET,
-                GITHUB_APP_PRIVATE_KEY, GITHUB_WEBHOOK_SECRET)
+                GH_APP_PRIVATE_KEY, GH_WEBHOOK_SECRET)
 [ ] 11 variables (CLOUDFLARE_ACCOUNT_ID, CLERK_JWKS_URL, CLERK_ISSUER,
                   NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY, STRIPE_PRICE_PRO,
-                  GITHUB_APP_ID, GITHUB_APP_SLUG,
+                  GH_APP_ID, GH_APP_SLUG,
                   CONTROL_PLANE_DOMAIN, DASHBOARD_DOMAIN,
                   CONTROL_PLANE_URL, DASHBOARD_ORIGIN)
 [ ] Zone on Cloudflare, token has zone-level Workers Routes/DNS/Zone perms

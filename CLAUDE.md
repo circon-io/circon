@@ -103,6 +103,11 @@ the actual work).
 
 Two things here are not obvious and cost real debugging:
 
+0. **The four settings are prefixed `GH_`, not `GITHUB_`.** Actions reserves the
+   `GITHUB_` prefix for both secrets and variables, so `GITHUB_APP_ID` is rejected
+   at creation time. The Worker reads the same `GH_` names, so one grep finds every
+   use. Unrelated: `GH_TOKEN`/`GITHUB_TOKEN` in `review.ts` are `gh`'s own
+   documented variables and are not part of this naming.
 1. **The private key must be PKCS#8.** GitHub issues PKCS#1 (`BEGIN RSA PRIVATE
    KEY`); WebCrypto imports only PKCS#8. `pemToDer` detects this and returns the
    `openssl pkcs8 -topk8` command, because the alternative is an inscrutable
