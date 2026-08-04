@@ -21,6 +21,10 @@ export type FeatureId =
 export interface PlanLimits {
   /** Enrolled, non-revoked runners. The headline limit. */
   runners: number
+  /** Connected repositories. A project is one repo from one integration. */
+  projects: number
+  /** Connected provider accounts. One GitHub org is enough for most people. */
+  integrations: number
   /** Jobs that may sit in the queue at once. */
   queuedJobs: number
   /** How far back run history is readable. */
@@ -47,6 +51,8 @@ export const PLANS: Record<PlanId, Plan> = {
     priceLabel: 'Free',
     limits: {
       runners: 1,
+      projects: 1,
+      integrations: 1,
       queuedJobs: 3,
       runHistoryDays: 7,
       monthlySpendCapUsd: 0,
@@ -66,6 +72,8 @@ export const PLANS: Record<PlanId, Plan> = {
     priceLabel: 'Paid',
     limits: {
       runners: 10,
+      projects: 10,
+      integrations: 3,
       queuedJobs: 50,
       runHistoryDays: 90,
       monthlySpendCapUsd: 0,

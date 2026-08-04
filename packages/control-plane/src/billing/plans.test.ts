@@ -10,6 +10,18 @@ describe('plan definitions', () => {
     assert.equal(PLANS.pro.limits.runners, 10)
   })
 
+  test('basic allows one project, pro allows ten', () => {
+    assert.equal(PLANS.basic.limits.projects, 1)
+    assert.equal(PLANS.pro.limits.projects, 10)
+  })
+
+  test('every plan defines every limit, so a new one cannot be forgotten', () => {
+    const names = Object.keys(PLANS.basic.limits).sort()
+    for (const plan of Object.values(PLANS)) {
+      assert.deepEqual(Object.keys(plan.limits).sort(), names, `${plan.id} differs`)
+    }
+  })
+
   test('every plan defines every feature, so a new flag cannot be forgotten', () => {
     const featureNames = Object.keys(PLANS.basic.features).sort()
     for (const plan of Object.values(PLANS)) {

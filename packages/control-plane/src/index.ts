@@ -4,7 +4,9 @@ import {
   authFailureResponse, unauthorized, forbidden,
 } from './auth.ts'
 import { RunnerDO } from './runner-do.ts'
-import { canEnrollRunner, canQueueJob, entitlementFor, countRunners } from './billing/entitlements.ts'
+import {
+  canEnrollRunner, canQueueJob, entitlementFor, countRunners, projectIsRunnable,
+} from './billing/entitlements.ts'
 import { createCheckout, createPortal, handleWebhook } from './billing/stripe.ts'
 import { publicPlans, isPlanId } from './billing/plans.ts'
 
@@ -365,6 +367,13 @@ async function queueJob(
   } | null
 
   if (!body?.projectSlug) return fail('invalid_input', 'projectSlug is required.')
+
+  // Refuse up front rather than letting the runner discover at clone time that
+  // it has no credential for this repository.
+  const runnable = await projectIsRunnable(env, org, body.projectSlug)
+  if (!runnable.allowed) {
+    return fail('project_not_runnable', runnable.reason ?? 'That project cannot run.', 409)
+  }
 
   const allowance = await canQueueJob(env, org)
   if (!allowance.allowed) {

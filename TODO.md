@@ -46,7 +46,9 @@ cost the same as one runaway.
 - [ ] "Connect GitHub" in the dashboard → App install → store `installation_id` per org
 - [ ] `installation` / `installation_repositories` webhooks keep the grant current
 - [ ] Repo picker in the dashboard, listing repos the installation can see
-- [ ] Write the chosen repo into the `projects` table (currently **never written**)
+- [x] Data model: `integrations` → `projects`, with plan limits on both
+- [x] `projectIsRunnable` refuses a job for a disconnected or inactive project
+- [ ] Write the chosen repo into the `projects` table
 - [ ] `GET /api/runner/clone-token` — mint a short-lived, repo-scoped install token
 - [ ] Runner clones over HTTPS with that token instead of relying on its SSH key
 - [ ] Open the review PR with the same token, dropping the `gh` CLI dependency
@@ -61,6 +63,31 @@ a connected GitHub repository" as though the connection existed. It does not:
   runner's SSH key was manually authorized by hand. A dashboard-dispatched job
   against any other repo simply fails to clone.
 - `QueueJob` takes a hand-typed slug with no check that the repo exists
+
+### The model
+
+```
+org (Clerk, holds the plan)
+ └── integration   a connected provider account — a GitHub App installation
+      └── project  one repository from that integration
+```
+
+Three levels rather than two, because **one installation covers many
+repositories**. Collapsing integration and project would mean a fresh connection
+per repo, which is not how installations work.
+
+`project = repo` is what the rest of the system already assumes: the `org__repo`
+slug is simultaneously the dashboard identifier, the runner's directory name and
+the job payload.
+
+A project is `active` only while its integration is live and the repo still
+accessible. Uninstalling the App marks projects inactive rather than deleting
+them, so the dashboard can say *why* something stopped — and inactive projects do
+not consume the plan allowance, or uninstalling would lock you out of connecting
+a replacement.
+
+Plan limits: **basic** 1 project / 1 integration, **pro** 10 projects /
+3 integrations.
 
 A **GitHub App** is the right mechanism rather than OAuth or a PAT: grants are
 per-repository, tokens are short-lived and installation-scoped, and revoking is

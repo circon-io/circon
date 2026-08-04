@@ -76,6 +76,90 @@ export async function canEnrollRunner(env: Env, orgId: string): Promise<Decision
   }
 }
 
+/**
+ * A project is a repository connected through an integration, so both are capped.
+ *
+ * Counted against *active* projects only: a project whose integration was
+ * uninstalled is inactive and should not consume the allowance, or uninstalling
+ * an App would silently lock someone out of connecting a replacement.
+ */
+export async function canAddProject(env: Env, orgId: string): Promise<Decision> {
+  const { plan, limits } = await entitlementFor(env, orgId)
+  const row = await env.DB.prepare(
+    `SELECT COUNT(*) AS n FROM projects WHERE org = ?1 AND status = 'active'`,
+  )
+    .bind(orgId)
+    .first<{ n: number }>()
+  const used = row?.n ?? 0
+
+  if (used < limits.projects) return { allowed: true, used, limit: limits.projects }
+
+  return {
+    allowed: false,
+    used,
+    limit: limits.projects,
+    reason:
+      `The ${plan.name} plan allows ${limits.projects} ` +
+      `project${limits.projects === 1 ? '' : 's'}.`,
+    ...(plan.id === 'basic' ? { upgradeTo: 'pro' as const } : {}),
+  }
+}
+
+export async function canAddIntegration(env: Env, orgId: string): Promise<Decision> {
+  const { plan, limits } = await entitlementFor(env, orgId)
+  const row = await env.DB.prepare(
+    'SELECT COUNT(*) AS n FROM integrations WHERE org = ?1 AND revoked_at IS NULL',
+  )
+    .bind(orgId)
+    .first<{ n: number }>()
+  const used = row?.n ?? 0
+
+  if (used < limits.integrations) return { allowed: true, used, limit: limits.integrations }
+
+  return {
+    allowed: false,
+    used,
+    limit: limits.integrations,
+    reason: `The ${plan.name} plan allows ${limits.integrations} connected account(s).`,
+    ...(plan.id === 'basic' ? { upgradeTo: 'pro' as const } : {}),
+  }
+}
+
+/**
+ * A job may only target a project that is actually usable.
+ *
+ * This is the guard that stops the current failure mode: queueing work for a
+ * repository the runner has no credential for, which fails at clone time on the
+ * runner rather than being refused up front.
+ */
+export async function projectIsRunnable(
+  env: Env,
+  orgId: string,
+  slug: string,
+): Promise<Decision> {
+  const row = await env.DB.prepare(
+    `SELECT p.status, i.revoked_at
+     FROM projects p JOIN integrations i ON i.id = p.integration_id
+     WHERE p.org = ?1 AND p.slug = ?2`,
+  )
+    .bind(orgId, slug)
+    .first<{ status: string; revoked_at: string | null }>()
+
+  if (!row) {
+    return { allowed: false, reason: `No project "${slug}" is connected.` }
+  }
+  if (row.revoked_at) {
+    return {
+      allowed: false,
+      reason: `The integration for "${slug}" was disconnected. Reconnect it to run again.`,
+    }
+  }
+  if (row.status !== 'active') {
+    return { allowed: false, reason: `Project "${slug}" is ${row.status}.` }
+  }
+  return { allowed: true }
+}
+
 export async function canQueueJob(env: Env, orgId: string): Promise<Decision> {
   const { plan, limits } = await entitlementFor(env, orgId)
   const row = await env.DB.prepare(
