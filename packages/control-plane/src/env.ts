@@ -14,11 +14,17 @@ export interface Env {
   // Stripe price ids differ between test and live mode, so they are vars.
   STRIPE_PRICE_PRO?: string
 
+  /** GitHub App: id and slug are public, the private key is not. */
+  GITHUB_APP_ID?: string
+  GITHUB_APP_SLUG?: string
+
   // secrets, set by the deploy workflow
   CLERK_SECRET_KEY?: string
   RUNNER_SECRET_PEPPER?: string
   STRIPE_SECRET_KEY?: string
   STRIPE_WEBHOOK_SECRET?: string
+  GITHUB_APP_PRIVATE_KEY?: string
+  GITHUB_WEBHOOK_SECRET?: string
 }
 
 export function json(body: unknown, status = 200): Response {

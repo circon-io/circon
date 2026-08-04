@@ -5,6 +5,11 @@ import {
 } from './auth.ts'
 import { RunnerDO } from './runner-do.ts'
 import {
+  githubInstallUrl, githubCallback, githubWebhook, listIntegrations,
+  listAvailableRepos, listProjects, createProject, deleteProject, cloneToken,
+  runnerPullRequest,
+} from './integrations/routes.ts'
+import {
   canEnrollRunner, canQueueJob, entitlementFor, countRunners, projectIsRunnable,
 } from './billing/entitlements.ts'
 import { createCheckout, createPortal, handleWebhook } from './billing/stripe.ts'
@@ -76,6 +81,17 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         return await handleWebhook(request, env)
       }
 
+      // Signature-authenticated, like Stripe's.
+      if (path === '/api/webhooks/github' && request.method === 'POST') {
+        return await githubWebhook(request, env)
+      }
+
+      // GitHub redirects the browser here after an install. `state` carries the
+      // org, so no session is needed.
+      if (path === '/api/integrations/github/callback') {
+        return await githubCallback(request, env)
+      }
+
       if (path === '/api/runner/socket') {
         const principal = await authenticateRunner(request, env)
         if (!principal) return unauthorized('Runner token rejected')
@@ -93,6 +109,19 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         const principal = await authenticateRunner(request, env)
         if (!principal) return unauthorized()
         return await claimJob(env, principal.id, principal.org)
+      }
+
+      if (path === '/api/runner/clone-token' && request.method === 'GET') {
+        const principal = await authenticateRunner(request, env)
+        if (!principal) return unauthorized()
+        const slug = new URL(request.url).searchParams.get('project') ?? ''
+        return await cloneToken(env, principal.org, slug)
+      }
+
+      if (path === '/api/runner/pull-request' && request.method === 'POST') {
+        const principal = await authenticateRunner(request, env)
+        if (!principal) return unauthorized()
+        return await runnerPullRequest(request, env, principal.org)
       }
 
       if (path === '/api/runner/run' && request.method === 'POST') {
@@ -119,6 +148,24 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         }
         if (path === '/api/jobs' && request.method === 'POST') {
           return await queueJob(request, env, principal.org, principal.id)
+        }
+        if (path === '/api/integrations' && request.method === 'GET') {
+          return await listIntegrations(env, principal.org)
+        }
+        if (path === '/api/integrations/github/install-url' && request.method === 'GET') {
+          return githubInstallUrl(env, principal)
+        }
+        if (path.startsWith('/api/integrations/') && path.endsWith('/repos')) {
+          return await listAvailableRepos(env, principal.org, path.split('/')[3] ?? '')
+        }
+        if (path === '/api/projects' && request.method === 'GET') {
+          return await listProjects(env, principal.org)
+        }
+        if (path === '/api/projects' && request.method === 'POST') {
+          return await createProject(request, env, principal.org)
+        }
+        if (path.startsWith('/api/projects/') && request.method === 'DELETE') {
+          return await deleteProject(env, principal.org, path.split('/')[3] ?? '')
         }
         if (path === '/api/billing' && request.method === 'GET') {
           return await billingSummary(env, principal.org)

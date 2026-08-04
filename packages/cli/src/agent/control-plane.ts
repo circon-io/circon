@@ -180,6 +180,58 @@ export async function reportRun(record: RunRecord): Promise<boolean> {
   return data !== null
 }
 
+/**
+ * Ask the control plane to open the pull request.
+ *
+ * The fallback for a runner with no `gh` login of its own: the control plane
+ * holds the App's private key, so it can always open the PR even when this
+ * machine has never been authenticated against GitHub at all.
+ */
+export async function requestPullRequest(input: {
+  project: string
+  title: string
+  body: string
+  head: string
+  base: string
+}): Promise<string | null> {
+  const enrollment = readEnrollment()
+  if (!enrollment) return null
+  const data = (await request(enrollment, '/api/runner/pull-request', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })) as { url?: string } | null
+  return data?.url ?? null
+}
+
+export interface CloneCredential {
+  /** The installation token itself — for a credential helper or gh's GH_TOKEN. */
+  token: string
+  /** The same token embedded in a remote URL. Convenient, but it persists. */
+  remote: string
+  defaultBranch: string
+  expiresAt: string
+}
+
+/**
+ * A repository-scoped clone credential from the control plane.
+ *
+ * This is what removes the need for the runner's SSH key to be authorized by
+ * hand on GitHub: the control plane mints a token for exactly one repository,
+ * valid for an hour, from the GitHub App installation the org connected.
+ *
+ * Returns null when unenrolled or unreachable, so a standalone runner working in
+ * a checkout it already has keeps working.
+ */
+export async function cloneCredential(slug: string): Promise<CloneCredential | null> {
+  const enrollment = readEnrollment()
+  if (!enrollment) return null
+  const data = (await request(
+    enrollment,
+    `/api/runner/clone-token?project=${encodeURIComponent(slug)}`,
+  )) as CloneCredential | null
+  return data && typeof data.remote === 'string' ? data : null
+}
+
 export function socketUrl(enrollment: Enrollment): string {
   const url = new URL('/api/runner/socket', enrollment.url)
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'

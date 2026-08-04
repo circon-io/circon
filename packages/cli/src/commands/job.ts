@@ -6,6 +6,10 @@ import { ui } from '../core/ui.ts'
 import { Repo } from '../agent/git.ts'
 import { readLock } from '../agent/lock.ts'
 import { runCommand } from './run.ts'
+import { cloneCredential } from '../agent/control-plane.ts'
+import {
+  configureCredentialHelper, credentialFlags, slugToHttps,
+} from '../agent/git-credential.ts'
 
 /**
  * Run the loop against a named project rather than the current directory.
@@ -56,6 +60,8 @@ export interface JobOptions {
   maxLoops?: number
   /** Explicit remote, for a host other than github.com or a fork. */
   remote?: string
+  /** The dispatched job's id, so the run report can close it. */
+  jobId?: string
 }
 
 export async function jobCommand(slug: string | undefined, opts: JobOptions = {}): Promise<number> {
@@ -79,18 +85,45 @@ export async function jobCommand(slug: string | undefined, opts: JobOptions = {}
   mkdirSync(root, { recursive: true })
 
   if (!existsSync(dir)) {
-    const remote = opts.remote ?? slugToRemote(slug)
+    // Probe the control plane first. A credential coming back proves three things
+    // at once: this runner is enrolled, the project exists, and the GitHub App
+    // still has access — all before git is given a chance to fail obscurely.
+    const credential = opts.remote ? null : await cloneCredential(slug)
+    const viaApp = credential ? slugToHttps(slug) : null
+    const remote = opts.remote ?? viaApp ?? slugToRemote(slug)
     if (!remote) {
       ui.error(`Cannot derive a remote from "${slug}". Pass --remote.`)
       return 1
     }
-    ui.step(`Cloning ${remote}…`)
-    const cloned = await run('git', ['clone', remote, dir], { stream: true })
+
+    // The URL carries no token: the helper supplies one per request, so nothing
+    // lands in .git/config and an hour-long expiry never strands a later push.
+    ui.step(viaApp ? `Cloning ${slug} via the GitHub App…` : `Cloning ${slug}…`)
+    const cloned = await run(
+      'git',
+      [...(viaApp ? await credentialFlags() : []), 'clone', remote, dir],
+      { stream: true },
+    )
     if (!cloned.ok) {
-      ui.error(`Clone failed. Check the runner's SSH key has access to ${slug}.`)
+      ui.error(`Clone of ${slug} failed.`)
+      ui.dim(
+        viaApp
+          ? '  The App token was rejected — confirm it still has access to this repository.'
+          : '  No control-plane credential. Either enroll this runner, or authorize its SSH key.',
+      )
       return 1
     }
+
+    if (viaApp) await configureCredentialHelper(dir)
   } else {
+    // Repair the helper on a checkout cloned by an older version, or one whose
+    // local config was reset. Harmless when it is already right, and the helper
+    // declines politely on a runner that is not enrolled.
+    const origin = await run('git', ['-C', dir, 'remote', 'get-url', 'origin'])
+    if (origin.ok && origin.stdout.trim().startsWith('https://github.com/')) {
+      await configureCredentialHelper(dir)
+    }
+
     // Bring the checkout up to date before the run, which is the single pull
     // point — never mid-loop, where it would race the agent's own commits.
     const repo = new Repo(dir)
@@ -114,7 +147,7 @@ export async function jobCommand(slug: string | undefined, opts: JobOptions = {}
   const previous = process.cwd()
   try {
     process.chdir(dir)
-    return await runCommand(opts.maxLoops ?? 20)
+    return await runCommand(opts.maxLoops ?? 20, opts.jobId ? { jobId: opts.jobId } : {})
   } finally {
     process.chdir(previous)
   }

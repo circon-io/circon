@@ -102,7 +102,7 @@ export async function agentCommand(): Promise<number> {
       running = true
       ui.step(`Claimed job ${job.id} — ${job.projectSlug}`)
       try {
-        await jobCommand(job.projectSlug, { maxLoops: job.maxLoops })
+        await jobCommand(job.projectSlug, { maxLoops: job.maxLoops, jobId: job.id })
       } catch (error) {
         ui.error(`Job failed: ${error instanceof Error ? error.message : String(error)}`)
       } finally {

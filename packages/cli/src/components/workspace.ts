@@ -4,6 +4,7 @@ import { run, which } from '../core/exec.ts'
 import { paths } from '../core/paths.ts'
 import { readConfig } from '../core/config.ts'
 import { type Component, ok, missing } from './types.ts'
+import { isEnrolled } from '../agent/control-plane.ts'
 
 export const DEFAULT_CONVENTIONS_REPO = 'https://github.com/circon-io/circon-conventions.git'
 
@@ -99,6 +100,74 @@ export const dailyReportComponent: Component = {
     await run('systemctl', ['--user', 'daemon-reload'])
     const enable = await run('systemctl', ['--user', 'enable', '--now', 'circon-report.timer'])
     if (!enable.ok) throw new Error('could not enable the report timer (no user session bus?)')
+    await run('sudo', ['loginctl', 'enable-linger', process.env['USER'] ?? ''])
+  },
+}
+
+/**
+ * The agent daemon as a user service, so an enrolled runner comes back after a
+ * reboot without anyone logging in.
+ *
+ * `--user` rather than a system unit because the agent needs the user's
+ * `~/.config/circon`, git identity, SSH agent and Android SDK — a system unit
+ * would need every one of those re-specified, and would run the agent as a
+ * different user than the one whose checkouts it works on. `enable-linger` is
+ * what makes a user service start at boot with nobody logged in.
+ *
+ * `check()` reports ok on an unenrolled machine: a runner with no control plane
+ * has nothing to poll, and reporting `missing` would make `doctor` red for a
+ * standalone install that is working exactly as intended.
+ */
+export const agentServiceComponent: Component = {
+  id: 'agent-service',
+  summary: 'Agent daemon at boot (systemd --user)',
+  linuxOnly: true,
+  requires: ['workspace'],
+
+  async check() {
+    if (!isEnrolled()) return ok('not enrolled — nothing to run')
+    const enabled = await run('systemctl', ['--user', 'is-enabled', 'circon-agent.service'])
+    if (!enabled.ok) return missing('not enabled')
+    // Enabled but dead is the failure that matters: jobs queue up and nothing
+    // ever claims them, with no error anywhere.
+    const active = await run('systemctl', ['--user', 'is-active', 'circon-agent.service'])
+    return active.ok ? ok('running') : missing('enabled but not running')
+  },
+
+  async install() {
+    if (!isEnrolled()) return
+
+    const unitDir = join(process.env['HOME'] ?? '', '.config', 'systemd', 'user')
+    mkdirSync(unitDir, { recursive: true })
+
+    const bin = (await which('circon')) ?? 'circon'
+    // Restart=always with a delay: the daemon's own loop tolerates an
+    // unreachable control plane, so a crash here means something unexpected and
+    // retrying slowly is better than a restart loop burning the journal.
+    writeFileSync(
+      join(unitDir, 'circon-agent.service'),
+      [
+        '[Unit]',
+        'Description=circon agent — claims and runs queued jobs',
+        'After=network-online.target',
+        '',
+        '[Service]',
+        'Type=simple',
+        `ExecStart=${bin} agent`,
+        'Restart=always',
+        'RestartSec=30',
+        // A run can last hours; stopping must let it finish the iteration.
+        'TimeoutStopSec=300',
+        '',
+        '[Install]',
+        'WantedBy=default.target',
+        '',
+      ].join('\n'),
+    )
+
+    await run('systemctl', ['--user', 'daemon-reload'])
+    const enable = await run('systemctl', ['--user', 'enable', '--now', 'circon-agent.service'])
+    if (!enable.ok) throw new Error('could not enable the agent service (no user session bus?)')
     await run('sudo', ['loginctl', 'enable-linger', process.env['USER'] ?? ''])
   },
 }

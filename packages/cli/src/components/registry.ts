@@ -9,7 +9,9 @@ import {
   ollamaComponent, ollamaModelComponent, ollamaTuningComponent, aiderComponent,
   context7Component,
 } from './ai.ts'
-import { workspaceComponent, conventionsComponent, dailyReportComponent } from './workspace.ts'
+import {
+  workspaceComponent, conventionsComponent, dailyReportComponent, agentServiceComponent,
+} from './workspace.ts'
 
 /**
  * Declaration order is install order. `requires` is validated against it, so a
@@ -36,6 +38,7 @@ export const components: Component[] = [
   sysctlComponent,
   gitIdentityComponent,
   dailyReportComponent,
+  agentServiceComponent,
 ]
 
 export function componentById(id: string): Component | undefined {

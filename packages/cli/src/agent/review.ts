@@ -134,6 +134,12 @@ export async function openPullRequest(
   summary: RunSummary,
   screenshots: string[],
   base: string,
+  /**
+   * A GitHub App installation token. When present, gh authenticates as the App
+   * and no `gh auth login` is needed on the runner — which is the whole point of
+   * enrolling one. Absent for a standalone runner, which uses its own gh login.
+   */
+  token?: string,
 ): Promise<{ url: string | null; reason?: string }> {
   if (!(await which('gh'))) {
     return { url: null, reason: 'gh CLI not installed' }
@@ -142,19 +148,25 @@ export async function openPullRequest(
     return { url: null, reason: 'no git remote' }
   }
 
-  const auth = await run('gh', ['auth', 'status'], { cwd, timeoutMs: 15_000 })
-  if (!auth.ok) return { url: null, reason: 'gh is not authenticated' }
+  // GH_TOKEN wins over any stored login, so this must be passed to every gh
+  // call below, not just the first.
+  const env = token ? { GH_TOKEN: token, GITHUB_TOKEN: token } : undefined
+  if (!token) {
+    const auth = await run('gh', ['auth', 'status'], { cwd, timeoutMs: 15_000 })
+    if (!auth.ok) return { url: null, reason: 'gh is not authenticated' }
+  }
 
   const existing = await run(
     'gh',
     ['pr', 'list', '--head', summary.branch, '--json', 'url', '--jq', '.[0].url'],
-    { cwd, timeoutMs: 30_000 },
+    { cwd, timeoutMs: 30_000, ...(env ? { env } : {}) },
   )
   if (existing.ok && existing.stdout.trim()) {
     // Re-running against the same branch updates rather than duplicating.
     await run('gh', ['pr', 'edit', summary.branch, '--body', prBody(summary, screenshots)], {
       cwd,
       timeoutMs: 30_000,
+      ...(env ? { env } : {}),
     })
     return { url: existing.stdout.trim() }
   }
@@ -168,7 +180,7 @@ export async function openPullRequest(
       '--title', prTitle(summary),
       '--body', prBody(summary, screenshots),
     ],
-    { cwd, timeoutMs: 60_000 },
+    { cwd, timeoutMs: 60_000, ...(env ? { env } : {}) },
   )
 
   if (!created.ok) {

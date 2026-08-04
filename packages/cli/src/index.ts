@@ -99,6 +99,12 @@ async function main(argv: string[]): Promise<number> {
       return agentCommand()
     }
 
+    // Not in the help output: git invokes this, people do not.
+    case 'git-credential': {
+      const { gitCredentialCommand } = await import('./agent/git-credential.ts')
+      return gitCredentialCommand(rest[0])
+    }
+
     case 'job': {
       const { jobCommand } = await import('./commands/job.ts')
       const remoteIdx = rest.indexOf('--remote')

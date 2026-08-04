@@ -89,6 +89,36 @@ if a `requires` names something unknown or declared later.
 - **Single pull point.** Conventions and the PRD are inputs to a run, fetched
   once at start, never mid-loop where they would race the agent's commits.
 
+### The GitHub connection
+
+A project *is* a connected repository. `org` (Clerk, holds the plan) →
+`integration` (one GitHub App installation) → `project` (one repository from it).
+Three levels because one installation covers many repositories.
+
+A **GitHub App**, not OAuth and not a PAT: grants are per-repository, tokens last
+an hour, and revoking access is uninstalling. Two credentials, easy to confuse —
+the **app JWT** (RS256, 10 min, identifies the App, only ever used to mint the
+next thing) and the **installation token** (1 hr, scoped to one repository, does
+the actual work).
+
+Two things here are not obvious and cost real debugging:
+
+1. **The private key must be PKCS#8.** GitHub issues PKCS#1 (`BEGIN RSA PRIVATE
+   KEY`); WebCrypto imports only PKCS#8. `pemToDer` detects this and returns the
+   `openssl pkcs8 -topk8` command, because the alternative is an inscrutable
+   `importKey` failure.
+2. **Never put the token in the remote URL.** It persists in `.git/config` and it
+   expires in an hour, so the *second* iteration's push fails with a bare 403 long
+   after the URL was written. Instead git calls back into the CLI —
+   `circon git-credential` answers git's credential protocol with a fresh token
+   per request. This needs `credential.useHttpPath=true`; without it git omits the
+   path and the helper cannot tell which repository is being asked about.
+
+`slugFor()` in the control plane and `isValidSlug()` in the CLI must agree: the
+slug `owner__repo` is a directory name on the runner *and* is split back into
+owner and repo to mint a token. A name containing `__` cannot round-trip, so it is
+refused at connect time rather than resolved by guessing.
+
 ### Conventions live in git
 
 `~/AI-Workspace/conventions` is a clone. `ARCHITECTURE.md` reaches the agents

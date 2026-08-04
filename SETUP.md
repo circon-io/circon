@@ -21,6 +21,8 @@ the dashboard to provide one.
 | `RUNNER_SECRET_PEPPER` | Generate yourself: `openssl rand -hex 32`. Peppers runner-token hashes; **changing it invalidates every enrolled runner**, so treat it as permanent. |
 | `STRIPE_SECRET_KEY` | Stripe → Developers → API keys → Secret key (`sk_live_…`) |
 | `STRIPE_WEBHOOK_SECRET` | Created in step 5 below (`whsec_…`) |
+| `GITHUB_APP_PRIVATE_KEY` | Created in step 6 below. Paste the whole PEM including the BEGIN/END lines. **Must be PKCS#8** — see step 6. |
+| `GITHUB_WEBHOOK_SECRET` | Generate yourself: `openssl rand -hex 32`. Also entered in the App's settings. |
 
 `GITHUB_TOKEN` is injected automatically. **Do not create one.**
 
@@ -46,6 +48,8 @@ keys and account ids belong here, not in secrets, so they can be diffed.
 | `CLERK_ISSUER` | The origin of that same host, no path |
 | `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Clerk → API Keys → Publishable key (`pk_live_…`) |
 | `STRIPE_PRICE_PRO` | The Pro price id from step 5 (`price_…`) |
+| `GITHUB_APP_ID` | The numeric App ID from step 6 |
+| `GITHUB_APP_SLUG` | The App's URL slug from step 6, e.g. `circon-agent`. Builds the install link. |
 | `CONTROL_PLANE_DOMAIN` | Hostname for the API Worker, e.g. `api.circon.io`. Zone must be on Cloudflare. |
 | `DASHBOARD_DOMAIN` | Hostname for the dashboard, e.g. `app.circon.io` |
 | `CONTROL_PLANE_URL` | `https://<CONTROL_PLANE_DOMAIN>` |
@@ -101,7 +105,58 @@ configured id exactly and returns `null` on a mismatch rather than guessing, so
 a test-mode id in live config leaves paying customers on the free plan. Check
 which mode you copied from.
 
-## 6. npm (publishing the CLI)
+## 6. GitHub App
+
+A project *is* a connected repository, so nothing works until this exists. A
+GitHub App rather than OAuth or a personal access token: grants are
+per-repository, tokens last an hour, and revoking access is uninstalling.
+
+**Settings → Developer settings → GitHub Apps → New GitHub App**
+
+| Field | Value |
+|---|---|
+| Name | Anything free, e.g. `circon-agent`. Its slug goes in `GITHUB_APP_SLUG`. |
+| Homepage URL | `<DASHBOARD_ORIGIN>` |
+| Callback URL | `<CONTROL_PLANE_URL>/api/integrations/github/callback` |
+| Request user authorization on install | off |
+| Webhook URL | `<CONTROL_PLANE_URL>/api/webhooks/github` |
+| Webhook secret | The `GITHUB_WEBHOOK_SECRET` you generated |
+| Where can it be installed | Any account, or only yours — your call |
+
+**Repository permissions** — only these four:
+
+| Permission | Level | Why |
+|---|---|---|
+| Contents | Read and write | Clone the repo, push the agent's branch |
+| Pull requests | Read and write | Open the PR at the end of a run |
+| Metadata | Read | Mandatory, granted automatically |
+| Workflows | Read and write | Only if the agent should be able to edit `.github/workflows` — omit otherwise |
+
+**Subscribe to events**: `Installation target`, `Repository` — enough to notice an
+uninstall or a repository being deselected. Nothing else is read.
+
+Then, on the App's page:
+
+1. Copy the **App ID** into the `GITHUB_APP_ID` variable.
+2. **Generate a private key** and download the `.pem`.
+3. **Convert it.** GitHub issues PKCS#1 (`BEGIN RSA PRIVATE KEY`); WebCrypto in
+   Workers only imports PKCS#8. The API detects this and says so, but convert it
+   once here instead:
+
+   ```bash
+   openssl pkcs8 -topk8 -inform PEM -outform PEM -nocrypt \
+     -in circon-agent.private-key.pem -out circon-app-key-pkcs8.pem
+   ```
+
+   The result starts `-----BEGIN PRIVATE KEY-----`. Paste that whole file into
+   `GITHUB_APP_PRIVATE_KEY`.
+
+Users install the App themselves from the dashboard — **Connect GitHub** — and
+choose which repositories it may see. Each repository they then connect becomes a
+project. The runner never holds a GitHub credential: it asks the control plane
+for a token scoped to one repository, valid one hour, at clone time.
+
+## 7. npm (publishing the CLI)
 
 Trusted publishing is configured on the *package*, so the package must exist
 first. That makes the first publish manual — and the only one:
@@ -123,7 +178,7 @@ Then **npmjs.com → @circon/cli → Settings → Trusted Publisher**:
 A path instead of a filename, or an environment set on one side and blank on the
 other, both surface as a bare `E404` on publish rather than an auth error.
 
-## 7. Clerk
+## 8. Clerk
 
 1. Create the application.
 2. **Enable Organizations** (Configure → Organizations). Entitlements are keyed
@@ -131,7 +186,7 @@ other, both surface as a bare `E404` on publish rather than an auth error.
 3. Copy the publishable key, secret key and JWKS URL into the values above.
 4. Nothing else — billing metadata is written by the Stripe webhook.
 
-## 8. Cloudflare
+## 9. Cloudflare
 
 ### Register a workers.dev subdomain — once, before the first deploy
 
@@ -190,15 +245,18 @@ rather than reaching for the template.
 
 ```
 [ ] GitHub environment `production` with required reviewers
-[ ] 5 secrets  (CLOUDFLARE_API_TOKEN, CLERK_SECRET_KEY, RUNNER_SECRET_PEPPER,
-                STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET)
-[ ] 9 variables (CLOUDFLARE_ACCOUNT_ID, CLERK_JWKS_URL, CLERK_ISSUER,
-                 NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY, STRIPE_PRICE_PRO,
-                 CONTROL_PLANE_DOMAIN, DASHBOARD_DOMAIN,
-                 CONTROL_PLANE_URL, DASHBOARD_ORIGIN)
+[ ] 7 secrets  (CLOUDFLARE_API_TOKEN, CLERK_SECRET_KEY, RUNNER_SECRET_PEPPER,
+                STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET,
+                GITHUB_APP_PRIVATE_KEY, GITHUB_WEBHOOK_SECRET)
+[ ] 11 variables (CLOUDFLARE_ACCOUNT_ID, CLERK_JWKS_URL, CLERK_ISSUER,
+                  NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY, STRIPE_PRICE_PRO,
+                  GITHUB_APP_ID, GITHUB_APP_SLUG,
+                  CONTROL_PLANE_DOMAIN, DASHBOARD_DOMAIN,
+                  CONTROL_PLANE_URL, DASHBOARD_ORIGIN)
 [ ] Zone on Cloudflare, token has zone-level Workers Routes/DNS/Zone perms
 [ ] workers.dev subdomain registered on the account (required even when unused)
 [ ] Workflow permissions: read/write + allow PR creation
+[ ] GitHub App: created, PKCS#8 key, webhook secret matching
 [ ] Stripe product, price, webhook endpoint
 [ ] npm: manual first publish, then trusted publisher
 [ ] Clerk: organizations enabled

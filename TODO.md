@@ -42,27 +42,43 @@ cost the same as one runaway.
 
 ## 1.5 GitHub connection — the missing foundation
 
-- [ ] GitHub App: manifest, registration, private key as a secret
-- [ ] "Connect GitHub" in the dashboard → App install → store `installation_id` per org
-- [ ] `installation` / `installation_repositories` webhooks keep the grant current
-- [ ] Repo picker in the dashboard, listing repos the installation can see
+- [x] GitHub App: registration documented, private key as a secret (PKCS#8 conversion)
+- [x] "Connect GitHub" in the dashboard → App install → `installation_id` per org
+- [x] `installation` / `installation_repositories` webhooks keep the grant current
+- [x] Repo picker in the dashboard, listing repos the installation can see
 - [x] Data model: `integrations` → `projects`, with plan limits on both
 - [x] `projectIsRunnable` refuses a job for a disconnected or inactive project
-- [ ] Write the chosen repo into the `projects` table
-- [ ] `GET /api/runner/clone-token` — mint a short-lived, repo-scoped install token
-- [ ] Runner clones over HTTPS with that token instead of relying on its SSH key
-- [ ] Open the review PR with the same token, dropping the `gh` CLI dependency
+- [x] Write the chosen repo into the `projects` table
+- [x] `GET /api/runner/clone-token` — mint a short-lived, repo-scoped install token
+- [x] Runner clones over HTTPS with that token instead of relying on its SSH key
+- [x] Open the review PR with the same token, dropping the `gh` login requirement
+- [x] `QueueJob` picks from connected projects instead of taking a typed slug
 
-**This was assumed solved and never built.** TODO said "a dashboard project *is*
-a connected GitHub repository" as though the connection existed. It does not:
+**This was assumed solved and never built** — it is now. TODO used to say "a
+dashboard project *is* a connected GitHub repository" as though the connection
+existed, while:
 
-- the `projects` table is created by migration `0001` and **never read or
+- the `projects` table was created by migration `0001` and **never read or
   written** — a dead table
-- there is **no GitHub integration of any kind** — no App, no OAuth, no token
-- `circon job` clones `git@github.com:org/repo.git`, so it only works where the
-  runner's SSH key was manually authorized by hand. A dashboard-dispatched job
-  against any other repo simply fails to clone.
-- `QueueJob` takes a hand-typed slug with no check that the repo exists
+- there was **no GitHub integration of any kind** — no App, no OAuth, no token
+- `circon job` cloned `git@github.com:org/repo.git`, so it only worked where the
+  runner's SSH key had been authorized by hand
+- `QueueJob` took a hand-typed slug with no check that the repo existed
+
+### Why a credential helper, not a token in the URL
+
+The obvious implementation — clone from
+`https://x-access-token:<token>@github.com/…` — is wrong twice over. The token
+lands in `.git/config` where it outlives the run, and it expires after an hour,
+so the *second* iteration's push fails with a bare 403 long after the URL was
+written.
+
+So git is configured to call back into the CLI: `circon git-credential` answers
+git's credential protocol by asking the control plane for a fresh
+repository-scoped token per request. Clone, fetch, pull and push all work,
+nothing is persisted, and expiry stops being anyone's problem. `useHttpPath` is
+what makes it possible — without it git omits the path and the helper cannot tell
+which repository is being asked about, so it would have to guess.
 
 ### The model
 
@@ -185,7 +201,7 @@ builds the PR, the reviewer installs it, then approves.
 service, so a runner never comes back after a reboot.*
 
 - [ ] `circon agent` — long-lived process, connects to its DO, heartbeats, waits
-- [ ] systemd unit enabled at boot, restart with backoff
+- [x] systemd unit enabled at boot, restart with backoff
 - [ ] Start / stop / queue a job from the dashboard
 - [ ] Survive control-plane outages without dying or losing the current job
 - [ ] Reuse the existing run lock so a dispatched job cannot race a manual one
@@ -216,14 +232,17 @@ becoming a compromised estate.
 
 ## 3.5 Wire the loop back to the control plane
 
-- [ ] `run.ts` calls `reportRun()` at start and at every exit path
+- [x] `run.ts` calls `reportRun()` at start and at every exit path
 - [ ] Stream log lines to the runner's Durable Object during a run
 - [ ] Send `run-started` / `run-finished` so the dashboard status is live
 
-`reportRun()` and `POST /api/runner/run` both exist and are **never called**, so
-the dashboard's run history and 24-hour cost figure stay permanently empty even
-with a runner enrolled and working. Perhaps twenty lines, and the single highest
-ratio of visible result to effort left on this list.
+`reportRun()` used to exist and never be called, leaving the dashboard's run
+history and 24-hour cost figure permanently empty even with a runner enrolled and
+working. It is now called twice: once at start, so a live run shows a truthful
+start time, and once from the `finally`, so no exit path — circuit breaker,
+infrastructure failure, or an uncaught throw — can leave a run stuck at
+`running`. The endpoint upserts on `runId`, which is what makes reporting twice
+safe.
 
 ## 4. Stop the agent editing the human's file
 

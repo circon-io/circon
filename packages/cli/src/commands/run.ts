@@ -13,8 +13,13 @@ import { readConventions } from '../components/workspace.ts'
 import { RunBudget, parseAiderCost, usd } from '../agent/spend.ts'
 import { readTasks, openTasks, markComplete, inferCompletedTask, allComplete } from '../agent/progress.ts'
 import { preflight, classifyFailure, backoffMs } from '../agent/health.ts'
-import { captureScreenshots, existingScreenshots, openPullRequest, type RunSummary } from '../agent/review.ts'
+import {
+  captureScreenshots, existingScreenshots, openPullRequest, prBody, prTitle, type RunSummary,
+} from '../agent/review.ts'
 import { collect } from './gc.ts'
+import {
+  reportRun, cloneCredential, requestPullRequest, type RunRecord,
+} from '../agent/control-plane.ts'
 
 const STUCK_LIMIT = 3
 const INFRA_RETRY_LIMIT = 5
@@ -34,7 +39,15 @@ function notesSince(cwd: string, startLines: number): string {
     .join('\n')
 }
 
-export async function runCommand(maxLoops = 20): Promise<number> {
+export interface RunOptions {
+  /**
+   * Set when the control plane dispatched this run, so the job can be closed
+   * when it ends. Absent for a run started by hand.
+   */
+  jobId?: string
+}
+
+export async function runCommand(maxLoops = 20, opts: RunOptions = {}): Promise<number> {
   const cwd = process.cwd()
   const project = basename(cwd)
   const cfg = readConfig()
@@ -60,6 +73,11 @@ export async function runCommand(maxLoops = 20): Promise<number> {
     return 1
   }
   clearStop()
+
+  // Declared out here so the finally can report even an aborted run: a record
+  // left at 'running' is worse than one marked failed, because nothing ever
+  // clears it. Null until the run actually starts.
+  let report: RunRecord | null = null
 
   try {
     const aider = await which('aider')
@@ -117,6 +135,12 @@ export async function runCommand(maxLoops = 20): Promise<number> {
     ui.dim(`log ${runLog}`)
 
     const startedAt = Date.now()
+    // Reported twice: now, so the dashboard shows the run live with a truthful
+    // start time, and again at the end with the outcome. The endpoint upserts on
+    // runId. Unenrolled runners get `false` and carry on.
+    report = { runId: `run_${randomBytes(9).toString('hex')}`, projectSlug: project, branch, ...(opts.jobId ? { jobId: opts.jobId } : {}) }
+    await reportRun(report)
+
     const completed: ReturnType<typeof readTasks> = []
     let commits = 0
     let stuck = 0
@@ -145,6 +169,8 @@ export async function runCommand(maxLoops = 20): Promise<number> {
       if (sick) {
         if (!sick.transient || infraRetries >= INFRA_RETRY_LIMIT) {
           ui.error(`Infrastructure problem: ${sick.what} — ${sick.detail}`)
+          // Named separately from a gate failure: the code was never the problem.
+          report.outcome = 'infrastructure'
           return 1
         }
         infraRetries++
@@ -249,12 +275,16 @@ export async function runCommand(maxLoops = 20): Promise<number> {
         await repo.hardReset()
         lastFailure =
           `The previous attempt failed the ${gate.failedTier} gate:\n${gate.output.slice(-2000)}`
+        report.failedTier = gate.failedTier ?? 'unknown'
         stuck++
         verifyNotes = await runVerification(cwd, `gate failure at the ${gate.failedTier} tier`, budget)
 
         if (stuck >= STUCK_LIMIT) {
           ui.error(`Circuit breaker: ${STUCK_LIMIT} consecutive gate failures. Halting.`)
           ui.dim(budget.summary())
+          report.outcome = 'stuck'
+          report.iterations = i
+          report.costUsd = budget.total
           return 1
         }
       }
@@ -274,6 +304,8 @@ export async function runCommand(maxLoops = 20): Promise<number> {
     if (commitSubjects.length === 0) {
       ui.warn('No commits produced — nothing to review.')
       ui.dim(budget.summary())
+      report.outcome = 'no-commits'
+      report.costUsd = budget.total
       return 0
     }
 
@@ -295,9 +327,24 @@ export async function runCommand(maxLoops = 20): Promise<number> {
 
     let prUrl: string | null = null
     if (pushed) {
-      const pr = await openPullRequest(cwd, repo, summary, screenshots, base)
+      // A fresh token rather than one held since the clone: an hour has very
+      // likely passed, and this is the last thing a run does.
+      const appToken = (await cloneCredential(project))?.token
+      const pr = await openPullRequest(cwd, repo, summary, screenshots, base, appToken)
       prUrl = pr.url
-      if (!prUrl && pr.reason) ui.warn(`No PR opened: ${pr.reason}`)
+
+      if (!prUrl) {
+        // gh is missing or unauthenticated. The control plane holds the App key,
+        // so it can open the PR even on a runner that has never seen GitHub.
+        prUrl = await requestPullRequest({
+          project,
+          title: prTitle(summary),
+          body: prBody(summary, screenshots),
+          head: branch,
+          base,
+        })
+        if (!prUrl && pr.reason) ui.warn(`No PR opened: ${pr.reason}`)
+      }
     }
 
     ui.blank()
@@ -311,12 +358,23 @@ export async function runCommand(maxLoops = 20): Promise<number> {
     ui.info(`Branch ${branch}${pushed ? ' (pushed)' : ' (local only)'}`)
     if (prUrl) ui.info(`Review: ${prUrl}`)
 
+    report.outcome = ended
+    report.iterations = commits
+    report.commits = commitSubjects.length
+    report.costUsd = budget.total
+    if (prUrl) report.prUrl = prUrl
+
     // Housekeeping while nothing else is running.
     const reclaimed = await collect({ cwd })
     if (reclaimed.length) ui.dim(`gc: tidied ${reclaimed.length} thing(s)`)
 
     return 0
   } finally {
+    if (report) {
+      // No outcome means something threw. Recording that is the point.
+      report.outcome ??= 'aborted'
+      await reportRun(report)
+    }
     releaseLock()
     clearStop()
   }

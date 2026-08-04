@@ -69,7 +69,9 @@ jobs:
             --var CLERK_JWKS_URL:"${{ vars.CLERK_JWKS_URL }}" \
             --var CLERK_ISSUER:"${{ vars.CLERK_ISSUER }}" \
             --var DASHBOARD_ORIGIN:"${{ vars.DASHBOARD_ORIGIN }}" \
-            --var STRIPE_PRICE_PRO:"${{ vars.STRIPE_PRICE_PRO }}"
+            --var STRIPE_PRICE_PRO:"${{ vars.STRIPE_PRICE_PRO }}" \
+            --var GITHUB_APP_ID:"${{ vars.GITHUB_APP_ID }}" \
+            --var GITHUB_APP_SLUG:"${{ vars.GITHUB_APP_SLUG }}"
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
@@ -94,20 +96,29 @@ jobs:
             echo "  set $1"
           }
 
-          # Optional: billing simply stays switched off until these exist.
+          # Optional: the feature named in $3 stays switched off until it exists.
+          # Named explicitly, because "billing is off" and "GitHub is off" are
+          # very different symptoms to debug from a dashboard that half works.
           optional() {
             if [ -n "${2:-}" ]; then
               printf '%s' "$2" | npx wrangler secret put "$1"
               echo "  set $1"
             else
-              echo "::warning::$1 is not set — billing endpoints will return 503."
+              echo "::warning::$1 is not set — $3"
             fi
           }
 
           require  CLERK_SECRET_KEY      "${{ secrets.CLERK_SECRET_KEY }}"
           require  RUNNER_SECRET_PEPPER  "${{ secrets.RUNNER_SECRET_PEPPER }}"
-          optional STRIPE_SECRET_KEY     "${{ secrets.STRIPE_SECRET_KEY }}"
-          optional STRIPE_WEBHOOK_SECRET "${{ secrets.STRIPE_WEBHOOK_SECRET }}"
+          optional STRIPE_SECRET_KEY     "${{ secrets.STRIPE_SECRET_KEY }}" \
+                   "billing endpoints will return 503."
+          optional STRIPE_WEBHOOK_SECRET "${{ secrets.STRIPE_WEBHOOK_SECRET }}" \
+                   "plan changes made in Stripe will not reach Clerk."
+          # The private key is multi-line PEM; printf '%s' keeps it byte-exact.
+          optional GITHUB_APP_PRIVATE_KEY "${{ secrets.GITHUB_APP_PRIVATE_KEY }}" \
+                   "projects cannot be connected and runners cannot clone."
+          optional GITHUB_WEBHOOK_SECRET  "${{ secrets.GITHUB_WEBHOOK_SECRET }}" \
+                   "an uninstalled GitHub App will not deactivate its projects."
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}

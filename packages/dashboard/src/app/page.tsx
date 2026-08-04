@@ -8,6 +8,7 @@ import { EnrollRunner } from '@/components/enroll-runner'
 import { QueueJob } from '@/components/queue-job'
 import { RunsTable } from '@/components/runs-table'
 import { BillingCard } from '@/components/billing-card'
+import { Projects } from '@/components/projects'
 import { money, useApi, type Run, type Runner } from '@/lib/api'
 
 export default function DashboardPage() {
@@ -17,6 +18,8 @@ export default function DashboardPage() {
   const [spend, setSpend] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  // Bumped when a project is connected or removed, to remount the queue form's list.
+  const [projectEpoch, setProjectEpoch] = useState(0)
 
   const refresh = useCallback(async () => {
     try {
@@ -85,11 +88,18 @@ export default function DashboardPage() {
         )}
       </section>
 
+      <Projects
+        onChanged={() => {
+          setProjectEpoch((n) => n + 1)
+          void refresh()
+        }}
+      />
+
       <BillingCard />
 
       <div className="grid gap-4 md:grid-cols-2">
         <EnrollRunner onEnrolled={() => void refresh()} />
-        <QueueJob onQueued={() => void refresh()} />
+        <QueueJob key={projectEpoch} onQueued={() => void refresh()} />
       </div>
 
       <section className="flex flex-col gap-3">
