@@ -122,7 +122,7 @@ something to do to a live App with other people's installations on it.
 
 | Field | Value |
 |---|---|
-| Name | Anything free, e.g. `circon-agent`. Its slug goes in `GITHUB_APP_SLUG`. |
+| Name | `circon`. Its slug goes in `GITHUB_APP_SLUG` — see below. |
 | Homepage URL | `<DASHBOARD_ORIGIN>` |
 | Callback URL | `<CONTROL_PLANE_URL>/api/integrations/github/callback` |
 | Request user authorization on install | off |
@@ -132,7 +132,17 @@ something to do to a live App with other people's installations on it.
 
 **Any account** is the one field to get right first time. "Only on this account"
 limits installs to `circon-io`'s own repositories, so Connect GitHub works for you
-and for nobody else — and it is awkward to change once installations exist.
+and for nobody else — and it is awkward to change once installations exist. It
+makes the App's page public; that is not a Marketplace listing, which is a
+separate opt-in you do not need.
+
+The **name** matters more than it looks. It becomes the slug, and the slug becomes
+the bot identity: every pull request the agent opens is authored by
+`<slug>[bot]`, in every connected repository, permanently. It is also the install
+URL the dashboard sends people to. Renaming later works and installations survive,
+but the slug moves with it, so `GITHUB_APP_SLUG` has to be updated or Connect
+GitHub starts 404ing. Names are unique across all of GitHub, 34 characters max,
+and may not contain the word "GitHub".
 
 Make a **second App under your personal account for development**. Callback and
 webhook URLs are per-App, so without one you end up repointing production at a
