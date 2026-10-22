@@ -1,155 +1,115 @@
 # TODO
 
-Work that is designed but not built, with the reasoning that led to deferring
-it. Kept so the *why* survives — a bare task list loses the decision.
+Work towards [VISION.md](VISION.md), most urgent first. Each item keeps the
+reasoning behind it, because a bare task list loses the decision.
 
-Ordered by what should happen first.
+Done work is condensed under [Done](#done). When an item stops making sense, it
+moves to [Decided against](#decided-against) together with the reason, instead
+of just disappearing.
 
 ---
 
 ## 0. Prove the loop
 
-- [ ] One real `circon run` on a throwaway project, end to end
+- [ ] One real `circon run` on a throwaway project, end to end. Runbook:
+      [docs/first-run.md](docs/first-run.md)
+- [ ] The same run again, this time with `agents.build` set to `claude-code`
 
-Everything below assumes aider plus a 7B local editor can reliably finish a PRD
-task and that the accessibility gate catches real regressions. Neither has been
-observed once. Until it has, the rest of this list is building on an unverified
-premise — the control plane would be a window onto nothing.
-
----
-
-## 1. Spend control
-
-- [x] `budget.perRun` and `budget.perDay` in config, dashboard-editable
-- [x] Parse aider's per-message cost line; accumulate per run
-- [x] Add the verify pass and any cloud build to the same ledger
-- [x] **Hard stop** when a cap is hit, mid-run, not a warning after the fact
-- [x] Spend ledger at `~/.local/state/circon/spend.json`, rolling per day
-- [x] Cost per run in the daily report and in the PR body
-- [x] Refuse to start a run that would exceed the daily cap
-
-Correctness has a circuit breaker; spend has nothing. `verifyBudgetUsd` caps one
-review pass at $0.50 and that is the only limit anywhere.
-
-The gap that matters: the breaker trips on **three consecutive gate failures**,
-so a loop that passes its gate every time while producing mediocre work runs all
-20 iterations at full price. Multiply by N runners taking jobs from a dashboard.
-
-A daily cap needs to be machine-wide rather than per-run, or twenty small runs
-cost the same as one runaway.
+Everything below assumes an agent can reliably finish a PRD task, and that the
+accessibility gate catches real regressions. Nobody has seen either happen yet.
+Until someone has, everything on this list rests on an unverified premise.
 
 ---
 
-## 1.5 GitHub connection — the missing foundation
+## 1. Runner ↔ control plane, actually wired
 
-- [x] GitHub App: registration documented, private key as a secret (PKCS#8 conversion)
-- [x] "Connect GitHub" in the dashboard → App install → `installation_id` per org
-- [x] `installation` / `installation_repositories` webhooks keep the grant current
-- [x] Repo picker in the dashboard, listing repos the installation can see
-- [x] Data model: `integrations` → `projects`, with plan limits on both
-- [x] `projectIsRunnable` refuses a job for a disconnected or inactive project
-- [x] Write the chosen repo into the `projects` table
-- [x] `GET /api/runner/clone-token` — mint a short-lived, repo-scoped install token
-- [x] Runner clones over HTTPS with that token instead of relying on its SSH key
-- [x] Open the review PR with the same token, dropping the `gh` login requirement
-- [x] `QueueJob` picks from connected projects instead of taking a typed slug
+Much of this was built on one side only. The DO accepted `log`, `run-started`
+and `run-finished`, but the CLI never sent them, so the dashboard's log view was
+always empty. Remote config was fetched and then thrown away.
 
-**This was assumed solved and never built** — it is now. TODO used to say "a
-dashboard project *is* a connected GitHub repository" as though the connection
-existed, while:
+- [ ] Stream run output to the runner's DO, and send `run-started` and
+      `run-finished`
+- [ ] Heartbeat carries run id, branch, iteration and cost
+- [ ] Layered config: defaults ← local ← org ← runner ← project. The server
+      resolves it at claim time and sends it in the job payload
+- [ ] Org-level defaults, plus config editing per runner and per project, in the
+      dashboard
+- [ ] `config-changed` and `prd-changed` take effect at the **next iteration
+      boundary**, never mid-iteration
+- [ ] Target a job at a specific runner. `command:'run'` wakes the daemon so it
+      claims immediately
+- [ ] The DO writes `last_seen_at`. A job claimed by a runner that has gone dark
+      is put back in the queue
+- [ ] The dashboard shows each runner's CLI version and resolved conventions
+      version
+- [ ] Conventions are resolved once at job start, not only by `circon update`
+- [ ] Run view in the dashboard, linked from the PR body and back
+- [ ] Enforce `runHistoryDays`, `liveLogs` and `monthlySpendCapUsd`, which are
+      defined but have never been checked
+- [ ] **Security:** sign the GitHub install `state`, and confirm through the
+      user's OAuth token that they can access the `installation_id`
 
-- the `projects` table was created by migration `0001` and **never read or
-  written** — a dead table
-- there was **no GitHub integration of any kind** — no App, no OAuth, no token
-- `circon job` cloned `git@github.com:org/repo.git`, so it only worked where the
-  runner's SSH key had been authorized by hand
-- `QueueJob` took a hand-typed slug with no check that the repo existed
+The callback currently trusts a caller-supplied `installation_id` together with
+an unsigned `state=org`. Anyone could attach someone else's installation to
+their own org and mint tokens for those repositories.
 
-### Why a credential helper, not a token in the URL
+### Why the PRD can be synced mid-run
 
-The obvious implementation — clone from
-`https://x-access-token:<token>@github.com/…` — is wrong twice over. The token
-lands in `.git/config` where it outlives the run, and it expires after an hour,
-so the *second* iteration's push fails with a bare 403 long after the URL was
-written.
+CLAUDE.md said "single pull point": conventions and the PRD were fetched once at
+start. For conventions, that still holds. They are the contract, and changing
+the contract under a running agent is how a loop turns incoherent.
 
-So git is configured to call back into the CLI: `circon git-credential` answers
-git's credential protocol by asking the control plane for a fresh
-repository-scoped token per request. Clone, fetch, pull and push all work,
-nothing is persisted, and expiry stops being anyone's problem. `useHttpPath` is
-what makes it possible — without it git omits the path and the helper cannot tell
-which repository is being asked about, so it would have to guess.
+The PRD is different now. The agent never writes it (§4 in Done), so taking the
+human's latest version is a one-file checkout with no merge. It happens only
+between iterations, so a running edit is never pulled out from under the agent.
 
-### The model
+---
 
-```
-org (Clerk, holds the plan)
- └── integration   a connected provider account — a GitHub App installation
-      └── project  one repository from that integration
-```
+## 2. Agent backends and per-role models
 
-Three levels rather than two, because **one installation covers many
-repositories**. Collapsing integration and project would mean a fresh connection
-per repo, which is not how installations work.
+- [ ] `AgentBackend` interface, implemented by aider, Claude Code and Codex
+- [ ] Roles: `plan` (optional), `build` and `review`, each with its own backend
+      and model
+- [ ] Subscription vs API billing per backend. Subscription cost is recorded as
+      notional and does not count against the cap
+- [ ] A usage-limit reply is classified as infrastructure: wait for the reset,
+      without counting a strike
+- [ ] `codex` component. `doctor` reports binary and auth status for each
+      backend
+- [ ] `circon config` walks through headless login (`claude setup-token`,
+      `codex login`)
+- [ ] `runCommand` takes injected deps, and the loop gets its own tests
+- [ ] Check the terms of service. Can a subscription CLI be driven unattended,
+      by the subscriber, on their own machine? The API-key path stays either way
 
-`project = repo` is what the rest of the system already assumes: the `org__repo`
-slug is simultaneously the dashboard identifier, the runner's directory name and
-the job payload.
+**Why:** paying per token makes long autonomous runs expensive. The user already
+pays for Claude Code or ChatGPT subscriptions. Splitting the work by role means
+the strongest model is used only where it matters. For example, plan with a
+reasoning model, build with Opus or a local model, and review with a second
+vendor that does not share the first one's blind spots.
 
-A project is `active` only while its integration is live and the repo still
-accessible. Uninstalling the App marks projects inactive rather than deleting
-them, so the dashboard can say *why* something stopped — and inactive projects do
-not consume the plan allowance, or uninstalling would lock you out of connecting
-a replacement.
+---
 
-Plan limits: **basic** 1 project / 1 integration, **pro** 10 projects /
-3 integrations.
+## 3. Idea → plan → approval
 
-A **GitHub App** is the right mechanism rather than OAuth or a PAT: grants are
-per-repository, tokens are short-lived and installation-scoped, and revoking is
-uninstalling. It also removes two current hacks — pre-authorized SSH keys, and
-`gh auth` on the runner for PR creation.
+- [ ] Dashboard: describe what to build. The control plane generates a PRD with
+      our model key, capped per plan
+- [ ] Refine through chat or direct edits. Every change is a version, with a diff
+- [ ] Approve: `PRD.md` is committed to the default branch, or a PR is opened if
+      the branch is protected
+- [ ] First job on an empty repository: `circon init --here` scaffolds into it
+- [ ] Onboarding stepper: Connect → Describe → Plan → Runner → Build
 
-Sequencing note: this blocks the dispatch story end to end, so it comes before
-anything in the control-plane section that assumes a project exists.
+**Why the control plane and not the runner:** in the intended flow, the plan
+comes *before* a runner is connected. The cost sits with us, so the number of
+generations per month is a plan limit.
 
-## 2. Projects, branches, review and release
+The generated PRD must use exactly the `- [ ]` task format that `progress.ts`
+parses. A test imports that parser, so the two cannot drift apart.
 
-The runner currently has no idea what a project is — `circon run` operates on
-`process.cwd()`. Dispatching a job from a dashboard needs all of this.
+---
 
-### Workspace
-
-- [x] Clone to `~/circon-projects/<org>__<repo>`, one directory per project
-- [x] `circon job <project-slug>` — clone or pull, then run
-- [x] Pull `main` before each run; never touch the working tree of another job
-
-A dashboard project *is* a connected GitHub repository, so the slug is already
-`<organization>__<repository>`. That becomes the directory name, and the runner
-never has to guess where anything lives.
-
-### Branch per run, not a long-lived work branch
-
-- [x] Replace `circon/work` with `circon/run-<date>-<shortid>`
-- [x] Delete the branch when its PR merges or the run is abandoned
-
-`circon/work` accumulates unrelated work and can never be partially accepted.
-One branch per run maps 1:1 to a PR and therefore 1:1 to a review decision:
-abandoned runs are deleted without touching anything else, and conflicts stay
-bounded to a single run's changes.
-
-### The review artifact
-
-- [x] Open a PR automatically when a run finishes with commits (via `gh`; move to the App token)
-- [x] Generate the body: tasks done, agent notes, gate results per tier, cost
-- [x] Capture a screenshot per screen at the end of a green run, attach to the PR
-- [ ] Link the PR to its dashboard run view, and the run view back to the PR
-
-**Accessibility trees are for the machine; screenshots are for the human.** The
-gate must keep asserting on the tree — pixels are the wrong thing to fail a
-build on. But a reviewer deciding whether this is worth shipping wants to see
-it, and `agent-device` already has a `screenshot` command. Capture them once,
-after the gate is green, purely as a review artifact.
+## 4. Review and release
 
 ### Two approval gates
 
@@ -158,276 +118,160 @@ run ──▶ PR ──▶ [gate 1: merge]  ──▶ main
                                      └──▶ version PR ──▶ [gate 2: release] ──▶ prod
 ```
 
-- [ ] Gate 1 — merging the PR means "this code is accepted"
-- [x] Gate 2 — merging the Changesets version PR triggers the actual release
+- [x] Gate 2: merging the Changesets version PR triggers the release
+- [ ] Gate 1: PR state (open / merged / closed) through `pull_request` webhooks
 - [ ] Release report in the dashboard: changelog, screenshots, gate results,
-      Codemagic dev-build link, cost
-- [ ] Approving the release report merges the version PR
+      Codemagic dev build, cost
+- [ ] Approving the report merges the version PR
 
-Two gates because they answer different questions. Gate 1 is "is this code
-correct" and belongs on the PR, next to the diff. Gate 2 is "should this go to
-users now" and belongs to whoever owns the product — they should be able to
-approve a changelog, look at screenshots and install a dev build without reading
-a diff. The changeset flow already produces the changelog; the dashboard just
-needs to render it as a report with an approve button.
+There are two gates because they answer different questions:
+- **Gate 1** asks "is this code correct?". It belongs on the PR, next to the diff.
+- **Gate 2** asks "should this go to users now?". It belongs to whoever owns the
+  product. They should be able to approve a changelog, look at screenshots and
+  install a dev build without reading a diff.
 
-For mobile, the dev build is the artifact that makes gate 2 real: Codemagic
-builds the PR, the reviewer installs it, then approves.
-
----
-
-## 3. Cloudflare control plane
-
-**Phase 1 — visibility**
-
-- [ ] `circon enroll --token <t>` — exchange a one-time token for a runner credential
-- [ ] Durable Object per runner: state, heartbeat, current job, log ring buffer
-- [ ] WebSocket log streaming, dashboard subscribes to the same DO
-- [ ] Next.js dashboard on Workers, Clerk auth, D1 for run history and cost
-
-**Phase 2 — configuration, PRDs and secrets**
-
-- [ ] Per-runner config: models, gate tiers, budgets, features
-- [ ] Org-level defaults a runner can override
-- [ ] PRD editing in the dashboard, written through to GitHub via a GitHub App
-- [ ] Push config and PRD changes to a running runner over its existing socket
-- [ ] Apply them at the **next iteration boundary**, never mid-iteration
-- [ ] Encrypted local cache so an unreachable control plane never blocks a run
-- [ ] Per-runner revocation
-
-**Phase 3 — runners as daemons**
-
-*Not started. `circon agent` exists as a command but nothing installs it as a
-service, so a runner never comes back after a reboot.*
-
-- [ ] `circon agent` — long-lived process, connects to its DO, heartbeats, waits
-- [x] systemd unit enabled at boot, restart with backoff
-- [ ] Start / stop / queue a job from the dashboard
-- [ ] Survive control-plane outages without dying or losing the current job
-- [ ] Reuse the existing run lock so a dispatched job cannot race a manual one
-
-DO hibernation means idle runners cost nothing. Deferred until the CLI settles,
-because the runner protocol should not be designed against a moving target.
-
-### Secret scoping
-
-Two scopes, because a runner works on many projects and
-`ARCHITECTURE.md` mandates Cloudflare tokens scoped to a single project:
+### Secrets
 
 | Scope | Examples | Lifetime |
 |---|---|---|
 | **Machine** | `ANTHROPIC_API_KEY` | held by the runner, rotated centrally |
 | **Project** | Cloudflare token, Clerk keys, Sentry DSN | fetched at job start, held only for that job |
 
-- [ ] Store both in Cloudflare Secrets Store, never in D1
-- [ ] Runner requests project secrets for the job it was dispatched, nothing else
-- [ ] Drop project secrets from memory and disk when the job ends
-- [ ] Rotation: change centrally, runners pick it up at the next job
+- [ ] Envelope-encrypted in D1 (AES-GCM, master key as a Worker secret).
+      Write-only from the dashboard
+- [ ] A runner receives only the secrets for the project it was dispatched for
+- [ ] Held in memory, injected into the agent and gate environments, dropped at
+      job end
+- [ ] Rotation: change it centrally, and runners pick it up at the next job
 
-Distributing secrets makes the control plane's blast radius every credential on
-every runner. Per-project scoping is what keeps a compromised runner from
-becoming a compromised estate.
-
----
-
-## 3.5 Wire the loop back to the control plane
-
-- [x] `run.ts` calls `reportRun()` at start and at every exit path
-- [ ] Stream log lines to the runner's Durable Object during a run
-- [ ] Send `run-started` / `run-finished` so the dashboard status is live
-
-`reportRun()` used to exist and never be called, leaving the dashboard's run
-history and 24-hour cost figure permanently empty even with a runner enrolled and
-working. It is now called twice: once at start, so a live run shows a truthful
-start time, and once from the `finally`, so no exit path — circuit breaker,
-infrastructure failure, or an uncaught throw — can leave a run stuck at
-`running`. The endpoint upserts on `runId`, which is what makes reporting twice
-safe.
-
-## 4. Stop the agent editing the human's file
-
-- [x] Move task completion out of `PRD.md` into `.circon/progress.json`
-- [x] Agent reads `PRD.md`, never writes it
-- [x] `completedTaskFromDiff` reads the state file instead of the staged diff
-- [x] `circon status` renders progress; the daily report reads the state file
-
-**This is the fix for mid-run PRD updates.** The conflict exists because both
-sides write the same file: the human edits the spec on `main`, the agent flips
-`- [ ]` to `- [x]` on the run branch. Merging `main` mid-run then conflicts on
-exactly the lines both touched.
-
-If `PRD.md` is written by one side only, merging it is always clean, and a live
-PRD update becomes a fast-forward of a file the agent never touches.
-
-Trade-off, stated honestly: `PRD.md` stops showing progress at a glance. That
-view moves to `circon status` and the dashboard. Worth it — the alternative is
-conflict resolution inside an autonomous loop, which is where this design gets
-genuinely dangerous.
+Distributing secrets puts every credential on every runner inside the control
+plane's blast radius. Scoping them per project is what stops a compromised
+runner from becoming a compromised estate.
 
 ---
 
-## 5. Tell infrastructure failure apart from gate failure
+## 5. Project template: portable by construction
 
-- [x] Preflight each iteration: Ollama responding, model loaded, disk headroom
-- [x] Classify known infra signatures in gate output (ECONNREFUSED, OOM, ENOSPC)
-- [x] Infra failures do **not** count toward the circuit breaker
-- [x] Retry with backoff instead; alert as "infrastructure", not "gate failed"
+- [ ] `services/api` on Hono: auth middleware (Clerk JWT), `requireRole`, `/me`,
+      an example admin route, a Clerk webhook. One adapter per hosting target
+- [ ] `packages/domain` for business logic, and Drizzle on SQLite (D1 by
+      default, libSQL elsewhere)
+- [ ] `apps/mobile`: Expo Router, HeroUI Native, a role-gated admin area,
+      exported to web
+- [ ] `apps/web` (optional, marketing and SEO only): Next.js, OpenNext
+      Cloudflare, HeroUI
+- [ ] `packages/ui`: real `index.web.tsx` and `index.native.tsx`
+- [ ] `codemagic.yaml` (iOS dev client plus store releases) and Changesets
+- [x] `.github/workflows/ci.yml` and `deploy.yml` in the template
+- [x] Zustand, Clerk, Sentry and i18n (en + de) packages
+- [ ] Conventions v2: the rules above, written down for the agent
 
-Today an Ollama OOM fails the gate, trips the breaker after three iterations,
-and reports "gate failure at the unit tests tier". The diagnosis is wrong and
-three iterations were paid for to reach it.
+**Why the admin area lives in the Expo app:** a second UI codebase is a second
+thing for the agent to keep in sync. Expo exports to web, so admins still get a
+browser.
 
----
+**Why Hono and Drizzle on SQLite:** each one keeps the code identical across
+hosts, and only an adapter file changes per target. That is what keeps one-click
+hosting on Netlify, Vercel, GCP and AWS, and managed per-customer hosting, an
+addition instead of a rewrite.
 
-## 6. Automatic cleanup
-
-- [x] `circon gc`, run after each job and on the daily timer
-- [x] Prune run logs older than 30 days
-- [x] Delete local `circon/run-*` branches whose PR is merged or closed
-- [x] Remove `.circon/*.log` from project working trees
-- [x] `pnpm store prune` when the store exceeds a threshold
-- [x] Report reclaimed space; refuse to run a job below a disk floor
-
-Deliberately **not** pruned: Ollama models (a re-pull is gigabytes), Docker
-volumes, and anything inside a project's `node_modules` that pnpm still
-references. Only things that are cheap to recreate.
-
-The box was at 94% full before any of this existed, and nothing currently
-deletes anything.
-
----
-
-## 7. Pin conventions to what the runner has
-
-- [x] Version the conventions repo (git tags, semver)
-- [x] `@circon/cli` declares the convention range it supports
-- [x] Runner resolves the newest conventions **within** that range, not `HEAD`
-- [x] `circon doctor` reports conventions requiring tooling that is not installed
-- [ ] Dashboard shows each runner's CLI and resolved convention version
-
-`ARCHITECTURE.md` states which package manager, Expo SDK and Node version to
-build against. Nothing checks that against the machine, so a convention edit can
-instruct the agent to use tooling the runner does not have — surfacing as a
-confusing gate error several iterations later rather than "your conventions and
-your machine disagree".
-
-```
-conventions v3  ── requires ──▶  cli >= 0.4   (pnpm 10, Node 24, Expo 57)
-conventions v4  ── requires ──▶  cli >= 0.6   (Expo 58)
-```
-
-Same pinned-versus-floating discipline the component model already applies to
-the machine, extended to the contract the agent follows.
+Fragment UI has 6 stars and calls itself "Work in Progress", and it would own
+the auth and billing screens. Keep it behind `packages/ui`, so replacing it is a
+local change.
 
 ---
 
-## 8. Project scaffold — wire the real stack
+## 6. Device testing and macOS runners
 
-- [ ] `apps/web` — Next.js on Cloudflare via `@opennextjs/cloudflare`, HeroUI, Fragment UI
-- [ ] `apps/mobile` — Expo with HeroUI Native
-- [x] `services/api` — Cloudflare Worker
-- [x] Zustand, Clerk, Sentry, i18n (en + de) wired in
-- [x] `packages/ui` adapter so Fragment UI can be swapped out locally
+- [ ] Boot the `circon_pixel` emulator when the gate needs a device, and reap it
+      afterwards
+- [ ] `Component.platforms` with per-platform strategies, replacing `linuxOnly`
+- [ ] macOS: a Homebrew base, Ollama on Metal, the Android SDK for mac, an Xcode
+      check, and launchd instead of systemd
+- [ ] `iosRunnerMode: none | simulator | device`, plus `.circon/flows/ios.sh`
+- [ ] Linux and a USB iPhone: a Codemagic dev-client IPA, installed with
+      `go-ios`, with WebDriverAgent for the UI hierarchy
 
-`circon init` currently produces an empty monorepo shell plus the gate flows.
-`ARCHITECTURE.md` already specifies all of the above; nothing generates it.
+**The constraint, written here so it is not re-derived:**
+- The iOS Simulator is macOS-only.
+- Running headless does not reduce rendering. It skips a window, not GPU work.
+- A QEMU macOS VM has no Metal, and never touches the NVIDIA GPU.
+- Apple has a documented open issue with the Simulator inside macOS VMs.
+- baguette is Apple Silicon only, while Docker-OSX emulates Intel, so the two
+  are mutually exclusive. Xcode 27 begins dropping Intel.
 
-Fragment UI is at 6 stars and self-described "Work in Progress", and it would
-own auth and billing screens. Keep it behind `packages/ui` so replacing it is a
-local change rather than a rewrite.
-
----
-
-## 9. CI/CD shipped inside the boilerplate
-
-- [x] `.github/workflows/ci.yml` in the template — typecheck, test, gate tiers
-- [x] `.github/workflows/deploy.yml` — web + Workers to Cloudflare
-- [ ] `codemagic.yaml` — iOS dev builds and both platforms' store releases
-- [ ] Changesets wired into the project template
-- [ ] `circon init` creates the GitHub repo and pushes, so CI exists from commit one
-
-The scaffold and its pipeline are **one deliverable**. A boilerplate that
-arrives without CI gets a hand-rolled pipeline per project, which is exactly the
-drift `ARCHITECTURE.md` exists to prevent.
-
-Android dev builds run **locally** on the box (free, no queue, the SDK is
-already there); only iOS needs cloud. Codemagic's 500 free minutes/month covers
-the expected iOS volume, where EAS's 15-build cap would be consumed by
-development alone.
-
-Reuse this repo's own `ci.yml` shape — reusable via `workflow_call`, release
-gated through `needs:` so a publish cannot outrun its checks.
+So iOS on Linux means a real device. A Mac running circon natively tests iOS
+locally, without any SSH orchestration.
 
 ---
 
-## 10. Credentials and context7
+## Later
 
-- [x] `circon config` prompts for GitHub, Clerk, Cloudflare and Sentry tokens
-- [x] Guidance or tooling for least-privilege, per-project Cloudflare tokens
-- [x] Install context7 MCP so agents get current docs for fast-moving betas
-
-context7 matters because the stack leans on packages that move fast (HeroUI
-Native is at 1.0 beta), where training data goes stale.
-
----
-
-## 11. iOS feedback — Loop 3
-
-- [ ] Buy the phone or the Mac, then implement that `iosRunnerMode`
-- [ ] `.circon/flows/ios.sh`
-
-Shipped as a stub: `iosRunnerMode: 'none'`, with the gate's ios tier already
-wired to read it. Web and Android need no Apple hardware, so this waits.
-
-**The constraint, so it is not re-derived:** the iOS Simulator is macOS-only.
-Headless does not reduce rendering — it skips a window, not GPU work. A QEMU
-macOS VM has no Metal and never touches the NVIDIA GPU. Apple has a documented
-open issue with the Simulator inside macOS VMs. baguette is Apple Silicon only
-while Docker-OSX emulates Intel, so they are mutually exclusive, and Xcode 27
-begins dropping Intel.
-
-| Mode | How | Cost | Catch |
-|---|---|---|---|
-| `device` | EAS builds a dev-client IPA → `go-ios` installs it from Linux → Metro serves JS over LAN → WebDriverAgent exposes the hierarchy | ~€100 phone + Apple Developer account | UDID registered **before** the build; one device per concurrent agent |
-| `mac` | Apple Silicon Mac running baguette as a headless simulator farm, over SSH | ~$599 M4 mini | needs the machine, and see below |
-
-Only the native shell needs rebuilding — a dev-client build loads its JS from
-Metro at runtime, so iteration does not cost a cloud build.
-
-**`device` is the one to build.** Ubuntu-only is the target, and `mac` mode
-means writing an SSH transport that macOS runner support (v2) would immediately
-make redundant. If a Mac is ever bought, run circon on it natively and iOS
-becomes a local gate tier with no transport at all.
+- **GitLab and other providers.** `integrations.provider` already exists. Keep
+  `integrations/` provider-shaped.
+- **One-click deploy** to Netlify, Vercel, GCP and AWS, and **managed hosting**
+  per customer. Portable projects (§5) are the prerequisite.
+- **Sync project secrets into GitHub Actions**, so CI can deploy without manual
+  setup. This needs a libsodium sealed box and the `secrets:write` App
+  permission.
 
 ---
 
-## v2 — nice to have
+## Done
 
-### macOS as a runner
-
-- [ ] `Component` gains per-platform strategies instead of `linuxOnly`
-- [ ] Homebrew base, Ollama on Metal, Android SDK mac tarball
-- [ ] launchd instead of systemd; Screen Sharing instead of GNOME RDP
-
-7 of 19 components already work anywhere, and `doctor` runs cleanly on macOS
-today, reporting the rest as *skipped*. Not urgent — Ubuntu is the target — but
-`Component.linuxOnly` is the wrong shape and is worth replacing before many more
-components are written against it.
-
-If it ever lands it collapses the iOS `mac` mode entirely: a Mac running circon
-natively tests iOS locally, with no SSH orchestration.
+- **Spend control:** per-run and per-day caps with a hard stop mid-run, a
+  rolling ledger, cost shown in the report and the PR body, and refusing to start
+  a run over the daily cap.
+- **GitHub connection:** a GitHub App, with installation per org kept current by
+  webhooks, a repo picker, and `integrations` → `projects` with plan limits.
+  Clone, fetch and push go through `circon git-credential`, which mints a fresh
+  repo-scoped token per request. That means no token is stored in a remote URL,
+  and no SSH keys need to be authorized by hand.
+- **Workspace:** one directory per project, `circon job <owner>__<repo>`, a
+  branch per run (`circon/run-<date>-<id>`), and a PR when a run ends with
+  commits, including a body and screenshots.
+- **Control plane, phase 1:** `circon enroll`, a Durable Object per runner
+  (state, heartbeat, a log ring buffer, a hibernating WebSocket), the Next.js
+  dashboard with Clerk and D1, per-runner revocation, and stopping and queueing
+  from the dashboard.
+- **Runner daemon:** `circon agent` with reconnect and backoff, heartbeat, job
+  claiming that respects the run lock, and a systemd unit enabled at enrollment.
+- **The agent no longer edits the human's file:** task state lives in
+  `.circon/progress.json`, and `PRD.md` is read-only to the agent.
+- **Infrastructure failures vs gate failures:** a preflight per iteration, known
+  failure signatures, retry with backoff, and no strike against the circuit
+  breaker.
+- **Automatic cleanup:** `circon gc` prunes logs and merged run branches, prunes
+  the pnpm store above a threshold, and refuses to start below a disk floor.
+- **Convention pinning:** a tagged conventions repo with `requires-cli`, and
+  runners resolve the newest tag they can satisfy.
+- **Credentials:** `circon config` and the context7 MCP. Credential files are
+  loaded into the environment at CLI start.
 
 ---
 
 ## Decided against
 
 **Docker.** Not the right axis. NVIDIA kernel modules, KVM, the Android emulator
-and USB all need host hardware access, which is the point of this machine. The
-agent runtime needs adb, the emulator, the GPU and the project tree — a
-container with all of that mounted is a worse chroot. For reproducible
-*machines* the tool is cloud-init or Ansible. Only Ollama would benefit.
+and USB all need direct access to host hardware, which is the whole point of
+this machine. A container with all of that mounted is a worse chroot. For
+reproducible *machines*, the tool is cloud-init or Ansible.
 
-**Telegram.** Dropped in favor of the dashboard. Notifications and the
-`circon listen` control daemon both go; the dashboard is the single place to see
-runs and control them, and maintaining two control surfaces means neither is
-trusted.
+**Telegram.** Dropped in favor of the dashboard. Two control surfaces means
+neither one is trusted.
+
+**`circon init` creates the GitHub repository.** In the intended flow, the user
+connects a repository that already exists. The first job scaffolds into it
+(§3).
+
+**An encrypted local cache for config.** Config holds no secrets, so the
+plaintext cache in `remote-config.json` is enough to keep a run going while the
+control plane is unreachable. Secrets are never cached, by design (§4).
+
+**Cloudflare Secrets Store for tenant secrets.** It is account-level and
+quota-bound, built for the operator's own handful of secrets, not for one set
+per customer project. Envelope encryption in D1 has no such ceiling.
+
+**iOS modes `vm` and `mac`.** `vm` is ruled out by the constraint in §6. `mac`
+meant writing an SSH transport to a Mac, which a native macOS runner makes
+unnecessary.

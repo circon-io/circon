@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+**The end goal is in [VISION.md](VISION.md)** — idea → AI plan → approved PRD →
+a runner builds, tests and ships it. Check changes against it; [TODO.md](TODO.md)
+is the ordered work towards it.
+
 ## What this repo is
 
 Two things with very different change rates, deliberately separated:
@@ -79,10 +83,11 @@ if a `requires` names something unknown or declared later.
   presence, so a project with none behaves like a bare `npm test`. **Preserve
   that.** Dependencies are injected so the tiers are testable without a
   toolchain; `gate.test.ts` is the parity record against the old bash version.
-- **`git.ts`** — the agent commits to `circon/work`, never the default branch.
-  That is what makes the loop's `reset --hard` safe: it can only ever discard
-  the agent's own work. Human PRD edits land on `main` and are merged in at run
-  start.
+- **`git.ts`** — each run commits to its own `circon/run-<date>-<id>` branch,
+  never the default branch, and ends in one PR. That is what makes the loop's
+  `reset --hard` safe: it can only ever discard the agent's own work. Humans own
+  `PRD.md` on `main`; the agent never writes it (task state lives in
+  `.circon/progress.json`), so syncing it into a run is always conflict-free.
 - **`lock.ts`** — one run at a time, PID-based so a lock left by a killed
   process is reclaimed. `stop` writes a flag checked **between iterations**, so
   a stop never lands mid-commit.
