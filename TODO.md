@@ -27,26 +27,26 @@ Much of this was built on one side only. The DO accepted `log`, `run-started`
 and `run-finished`, but the CLI never sent them, so the dashboard's log view was
 always empty. Remote config was fetched and then thrown away.
 
-- [ ] Stream run output to the runner's DO, and send `run-started` and
+- [x] Stream run output to the runner's DO, and send `run-started` and
       `run-finished`
-- [ ] Heartbeat carries run id, branch, iteration and cost
-- [ ] Layered config: defaults ← local ← org ← runner ← project. The server
+- [x] Heartbeat carries run id, branch, iteration and cost
+- [x] Layered config: defaults ← local ← org ← runner ← project. The server
       resolves it at claim time and sends it in the job payload
-- [ ] Org-level defaults, plus config editing per runner and per project, in the
+- [x] Org-level defaults, plus config editing per runner and per project, in the
       dashboard
-- [ ] `config-changed` and `prd-changed` take effect at the **next iteration
+- [x] `config-changed` and `prd-changed` take effect at the **next iteration
       boundary**, never mid-iteration
-- [ ] Target a job at a specific runner. `command:'run'` wakes the daemon so it
+- [x] Target a job at a specific runner. `command:'run'` wakes the daemon so it
       claims immediately
-- [ ] The DO writes `last_seen_at`. A job claimed by a runner that has gone dark
+- [x] The DO writes `last_seen_at`. A job claimed by a runner that has gone dark
       is put back in the queue
-- [ ] The dashboard shows each runner's CLI version and resolved conventions
+- [x] The dashboard shows each runner's CLI version and resolved conventions
       version
-- [ ] Conventions are resolved once at job start, not only by `circon update`
-- [ ] Run view in the dashboard, linked from the PR body and back
-- [ ] Enforce `runHistoryDays`, `liveLogs` and `monthlySpendCapUsd`, which are
+- [x] Conventions are resolved once at job start, not only by `circon update`
+- [x] Run view in the dashboard, linked from the PR body and back
+- [x] Enforce `runHistoryDays`, `liveLogs` and `monthlySpendCapUsd`, which are
       defined but have never been checked
-- [ ] **Security:** sign the GitHub install `state`, and confirm through the
+- [x] **Security:** sign the GitHub install `state`, and confirm through the
       user's OAuth token that they can access the `installation_id`
 
 The callback currently trusts a caller-supplied `installation_id` together with

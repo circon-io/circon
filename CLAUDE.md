@@ -91,8 +91,16 @@ if a `requires` names something unknown or declared later.
 - **`lock.ts`** — one run at a time, PID-based so a lock left by a killed
   process is reclaimed. `stop` writes a flag checked **between iterations**, so
   a stop never lands mid-commit.
-- **Single pull point.** Conventions and the PRD are inputs to a run, fetched
-  once at start, never mid-loop where they would race the agent's commits.
+- **Conventions are pinned once per job** (`job.ts` resolves the newest tag the
+  CLI satisfies) and never move mid-run: they are the contract. **Config and the
+  PRD may change mid-run, but only at an iteration boundary**: the daemon notes
+  `config-changed`/`prd-changed` from the dashboard and `run.ts` applies them
+  before the next iteration starts. The PRD sync is a one-file checkout, which
+  is conflict-free only because the agent never writes `PRD.md`.
+- **Config is layered**: CLI defaults < local `config.json` < org < runner <
+  project. The control plane merges the last three at claim time and ships the
+  snapshot in the job (`control-plane/src/config.ts` and `core/config.ts` must
+  agree on the shape).
 
 ### The GitHub connection
 
