@@ -119,10 +119,10 @@ run ──▶ PR ──▶ [gate 1: merge]  ──▶ main
 ```
 
 - [x] Gate 2: merging the Changesets version PR triggers the release
-- [ ] Gate 1: PR state (open / merged / closed) through `pull_request` webhooks
-- [ ] Release report in the dashboard: changelog, screenshots, gate results,
+- [x] Gate 1: PR state (open / merged / closed) through `pull_request` webhooks
+- [x] Release report in the dashboard: changelog, screenshots, gate results,
       Codemagic dev build, cost
-- [ ] Approving the report merges the version PR
+- [x] Approving the report merges the version PR
 
 There are two gates because they answer different questions:
 - **Gate 1** asks "is this code correct?". It belongs on the PR, next to the diff.
@@ -137,12 +137,12 @@ There are two gates because they answer different questions:
 | **Machine** | `ANTHROPIC_API_KEY` | held by the runner, rotated centrally |
 | **Project** | Cloudflare token, Clerk keys, Sentry DSN | fetched at job start, held only for that job |
 
-- [ ] Envelope-encrypted in D1 (AES-GCM, master key as a Worker secret).
+- [x] Envelope-encrypted in D1 (AES-GCM, master key as a Worker secret).
       Write-only from the dashboard
-- [ ] A runner receives only the secrets for the project it was dispatched for
-- [ ] Held in memory, injected into the agent and gate environments, dropped at
+- [x] A runner receives only the secrets for the project it was dispatched for
+- [x] Held in memory, injected into the agent and gate environments, dropped at
       job end
-- [ ] Rotation: change it centrally, and runners pick it up at the next job
+- [x] Rotation: change it centrally, and runners pick it up at the next job
 
 Distributing secrets puts every credential on every runner inside the control
 plane's blast radius. Scoping them per project is what stops a compromised

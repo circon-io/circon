@@ -8,9 +8,11 @@ import { AppShell } from '@/components/app-shell'
 import { PlanPanel } from '@/components/plan-panel'
 import { RunsTable } from '@/components/runs-table'
 import { ConfigEditor } from '@/components/config-editor'
+import { ReleasePanel } from '@/components/release-panel'
+import { SecretsEditor } from '@/components/secrets-editor'
 import { useApi, type Project, type Run, type RunConfig } from '@/lib/api'
 
-type Tab = 'plan' | 'runs' | 'settings'
+type Tab = 'plan' | 'runs' | 'releases' | 'settings'
 
 /**
  * One project: its plan, its runs, its settings. The plan comes first because
@@ -82,7 +84,7 @@ export default function ProjectPage() {
           {notice && <p className="text-sm text-default-500" role="status">{notice}</p>}
 
           <nav className="flex gap-4 border-b border-default-200 text-sm" aria-label="Project">
-            {(['plan', 'runs', 'settings'] as const).map((t) => (
+            {(['plan', 'runs', 'releases', 'settings'] as const).map((t) => (
               <button
                 key={t}
                 type="button"
@@ -101,6 +103,7 @@ export default function ProjectPage() {
             <CardContent className="py-4">
               {tab === 'plan' && <PlanPanel project={project} onChanged={() => void load()} />}
               {tab === 'runs' && <ProjectRuns slug={project.slug} />}
+              {tab === 'releases' && <ReleasePanel projectId={project.id} />}
               {tab === 'settings' && <ProjectSettings projectId={project.id} />}
             </CardContent>
           </CardRoot>
@@ -140,6 +143,12 @@ function ProjectSettings({ projectId }: { projectId: string }) {
         Settings for this project only. They override the organization defaults and each runner&apos;s own.
       </p>
       <ConfigEditor initial={config} endpoint={`/api/projects/${projectId}/config`} inheritsFrom="org or runner" />
+      <h3 className="mt-4 text-sm font-medium">Secrets</h3>
+      <p className="text-sm text-default-500">
+        Given to a runner only for this project&apos;s jobs, and only while the job runs: deploy tokens,
+        Clerk and Sentry keys, Codemagic credentials.
+      </p>
+      <SecretsEditor scope="project" projectId={projectId} />
     </div>
   )
 }

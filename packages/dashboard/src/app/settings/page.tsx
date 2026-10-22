@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { CardContent, CardHeader, CardRoot, CardTitle, Spinner } from '@heroui/react'
 import { AppShell } from '@/components/app-shell'
 import { ConfigEditor } from '@/components/config-editor'
+import { SecretsEditor } from '@/components/secrets-editor'
 import { useApi, type RunConfig } from '@/lib/api'
 
 /**
@@ -39,6 +40,18 @@ export default function SettingsPage() {
           )}
           {!config && !error && <Spinner size="sm" aria-label="Loading settings" />}
           {config && <ConfigEditor initial={config} endpoint="/api/settings" inheritsFrom="CLI default" />}
+        </CardContent>
+      </CardRoot>
+      <CardRoot>
+        <CardHeader className="flex flex-col items-start gap-1">
+          <CardTitle>Runner secrets</CardTitle>
+          <p className="text-sm text-default-500">
+            Given to every runner in the organization for each job — for example the API keys agents
+            bill to. Change one here and every runner uses the new value from its next job.
+          </p>
+        </CardHeader>
+        <CardContent>
+          <SecretsEditor scope="machine" />
         </CardContent>
       </CardRoot>
     </AppShell>
