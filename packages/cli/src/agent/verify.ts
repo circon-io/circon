@@ -79,9 +79,10 @@ Review the diff for:
 3. Violations of the engineering conventions, especially checks weakened to
    force a green gate - deleted tests, loosened assertions, removed
    expected-label entries, added ts-ignore, widened types
-4. User-facing gaps visible in the code - a loading, empty or error state the
-   screen does not handle, visible text outside i18n, an interactive element
-   without an accessibilityLabel, UI built around packages/ui instead of with it
+4. User-facing gaps visible in the code, judged against the conventions' UI
+   rules - a loading, empty or error state the screen does not handle, visible
+   text outside translations, an interactive element the accessibility tree
+   cannot reach, a one-off where the project has a shared component
 
 Report ONLY specific, real problems you can point at. No style opinions, no
 praise, no summary of what the code does. One finding per line, formatted:

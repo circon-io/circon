@@ -73,7 +73,7 @@ function Nav({ pendingRequests, onNavigate }: { pendingRequests: number; onNavig
 export function AppShell({ children }: { children: React.ReactNode }) {
   const api = useApi()
   const load = useCallback(() => api<Overview>('/api/overview'), [api])
-  const { data } = useData(load, { intervalMs: 15_000 })
+  const { data } = useData(load, { intervalMs: 30_000 })
   const [open, setOpen] = useState(false)
   const pending = data?.pendingRequests ?? 0
 

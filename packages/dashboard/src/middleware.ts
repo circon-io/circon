@@ -7,6 +7,9 @@ import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server'
  *
  * Preview mode (sample data, no Clerk) exists only under `next dev`; the same
  * check as lib/auth.tsx, repeated because middleware runs on its own runtime.
+ *
+ * Next 16 warns that `middleware.ts` is deprecated in favor of `proxy.ts`.
+ * Keep this name: OpenNext's Cloudflare adapter does not support `proxy.ts`.
  */
 const preview = process.env.NEXT_PUBLIC_PREVIEW === '1' && process.env.NODE_ENV === 'development'
 const isPublic = createRouteMatcher(['/sign-in(.*)', '/sign-up(.*)'])

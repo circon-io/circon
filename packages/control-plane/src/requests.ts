@@ -1,5 +1,4 @@
 import { type Env, fail, ok, id, nowIso } from './env.ts'
-import { notifyRunners } from './fleet.ts'
 import { putProjectSecret, validSecretName } from './secrets.ts'
 
 /**
@@ -91,15 +90,10 @@ export async function fulfillRequest(
   const body = (await request.json().catch(() => null)) as { value?: unknown } | null
   if (typeof body?.value !== 'string' || !body.value) return fail('invalid_value', 'A value is required.')
 
+  // Storing it resolves this request (and tells the runners), as it would
+  // from the Secrets list.
   const stored = await putProjectSecret(env, org, userId, open.project_id, open.name, body.value)
   if (stored) return stored
-
-  await env.DB.prepare(
-    `UPDATE secret_requests SET status = 'fulfilled', resolved_at = ?1, resolved_by = ?2 WHERE id = ?3`,
-  )
-    .bind(nowIso(), userId, requestId)
-    .run()
-  await notifyRunners(env, org, { type: 'secrets-changed', project: open.slug })
   return ok({ fulfilled: requestId })
 }
 

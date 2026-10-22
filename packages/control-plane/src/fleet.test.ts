@@ -2,7 +2,7 @@ import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
 import { fakeEnv, seedRunner, seedProject } from '../test/fakes.ts'
 import {
-  claimJob, queueJob, recordRun, listRuns, getRun, putSettings, putRunnerConfig,
+  claimJob, queueJob, recordRun, listRuns, getRun, putSettings, putRunnerConfig, getRunnerConfig, getProjectConfig,
   putProjectConfig, commandRunner, runnerConfig, DARK_RUNNER_MS,
 } from './fleet.ts'
 import { upsertIntegration } from './integrations/routes.ts'
@@ -75,6 +75,26 @@ describe('queueing and claiming', () => {
 
     const { job } = await data<{ job: Job }>(await claimJob(env, 'run_a', ORG))
     assert.deepEqual(job?.config, { budgetPerRunUsd: 2, budgetPerDayUsd: 40, iosRunnerMode: 'device' })
+  })
+
+  test('a layer reads back with what it inherits, and only from its own org', async () => {
+    const { env } = setup()
+    await data(await putSettings(post({ config: { skipTiers: ['ios UI'] } }), env, ORG, 'user'))
+    await data(await putRunnerConfig(post({ config: { verifyEvery: 3 } }), env, ORG, 'run_a'))
+    const runner = await data<{ config: unknown; inherited: unknown }>(await getRunnerConfig(env, ORG, 'run_a'))
+    assert.deepEqual(runner, { config: { verifyEvery: 3 }, inherited: { skipTiers: ['ios UI'] } })
+    const project = await data<{ inherited: unknown }>(await getProjectConfig(env, ORG, 'prj_acme__shop'))
+    assert.deepEqual(project.inherited, { skipTiers: ['ios UI'] })
+    assert.equal((await getRunnerConfig(env, 'org_other', 'run_a')).status, 404)
+  })
+
+  test('a project can turn back on a loop the org skips', async () => {
+    const { env } = setup()
+    await data(await putSettings(post({ config: { skipTiers: ['ios UI'] } }), env, ORG, 'user'))
+    await data(await putProjectConfig(post({ config: { skipTiers: [] } }), env, ORG, 'prj_acme__shop'))
+    await queueJob(post({ projectSlug: 'acme__shop' }), env, ORG, 'user')
+    const { job } = await data<{ job: Job }>(await claimJob(env, 'run_a', ORG))
+    assert.deepEqual(job?.config.skipTiers, [])
   })
 })
 

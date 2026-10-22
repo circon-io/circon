@@ -107,7 +107,11 @@ if a `requires` names something unknown or declared later.
   its notes (`agent/requests.ts` parses it; the instruction is in every build
   prompt). `run.ts` forwards each new name once; answering it in the dashboard
   stores a project secret and sends `secrets-changed`, and `run.ts` refetches
-  the job's secrets at the next iteration boundary.
+  the job's secrets at the next iteration boundary. Any write of that name
+  answers the request — `store()` in `secrets.ts` does it for every path.
+- **The daily report is a query, not a timer.** Runs carry their commit
+  subjects (`commit_subjects`) and the daemon sends a `health` snapshot every
+  ten minutes; `control-plane/src/digest.ts` builds "what was built" from them.
 - **Config is layered**: CLI defaults < local `config.json` < org < runner <
   project. The control plane merges the last three at claim time and ships the
   snapshot in the job (`control-plane/src/config.ts` and `core/config.ts` must

@@ -30,6 +30,7 @@ export function PlanPanel({ project, onChanged }: { project: Project; onChanged:
   const [plans, setPlans] = useState<PlanSummary[] | null>(null)
   const [selected, setSelected] = useState<number | null>(null)
   const [detail, setDetail] = useState<PlanDetail | null>(null)
+  const [detailError, setDetailError] = useState<string | null>(null)
   const [idea, setIdea] = useState('')
   const [instruction, setInstruction] = useState('')
   const [writing, setWriting] = useState<string | null>(null)
@@ -51,12 +52,19 @@ export function PlanPanel({ project, onChanged }: { project: Project; onChanged:
   useEffect(() => {
     void loadPlans()
   }, [loadPlans])
+  const loadDetail = useCallback(
+    (version: number) =>
+      api<PlanDetail>(`/api/projects/${project.id}/plans/${version}`)
+        .then((d) => {
+          setDetail(d)
+          setDetailError(null)
+        })
+        .catch((e: unknown) => setDetailError(e instanceof Error ? e.message : `Could not load version ${version}`)),
+    [api, project.id],
+  )
   useEffect(() => {
-    if (selected === null) return
-    api<PlanDetail>(`/api/projects/${project.id}/plans/${selected}`)
-      .then(setDetail)
-      .catch(() => setDetail(null))
-  }, [api, project.id, selected])
+    if (selected !== null) void loadDetail(selected)
+  }, [selected, loadDetail])
 
   const generate = async (body: { idea: string } | { instruction: string }) => {
     setBusy(true)
@@ -107,6 +115,8 @@ export function PlanPanel({ project, onChanged }: { project: Project; onChanged:
 
   const approve = async () => {
     if (!detail) return
+    // It is a commit to the default branch, which every runner builds from.
+    if (!confirm(`Approve version ${detail.plan.version}? It is written to ${project.slug.replace('__', '/')} as PRD.md on ${project.default_branch}.`)) return
     setBusy(true)
     try {
       const result = await api<{ kind: 'committed' | 'pull-request' }>(`/api/projects/${project.id}/plans/${detail.plan.version}/approve`, { method: 'POST' })
@@ -116,7 +126,7 @@ export function PlanPanel({ project, onChanged }: { project: Project; onChanged:
           ? 'Approved and committed as PRD.md. Runners pick it up from their next iteration.'
           : 'The default branch is protected, so a pull request was opened. Merge it to let runners build from it.',
       })
-      await loadPlans()
+      await Promise.all([loadPlans(), loadDetail(detail.plan.version)])
       onChanged()
     } catch (e) {
       setMessage({ tone: 'danger', text: e instanceof Error ? e.message : 'Could not approve' })
@@ -221,6 +231,11 @@ export function PlanPanel({ project, onChanged }: { project: Project; onChanged:
           </pre>
         ) : current ? (
           <div data-testid="plan-prd"><PrdView markdown={current.prd} /></div>
+        ) : detailError ? (
+          <div role="alert" className="flex flex-col items-start gap-3 py-10">
+            <p className="text-sm text-danger">{detailError}</p>
+            <Button size="sm" variant="outline" onPress={() => selected !== null && void loadDetail(selected)}>Try again</Button>
+          </div>
         ) : (
           <Skeleton className="h-96" />
         )}
@@ -257,7 +272,9 @@ export function PlanPanel({ project, onChanged }: { project: Project; onChanged:
                   ? `${detail.check.tasks.length} tasks. Approving writes PRD.md to ${project.default_branch}.`
                   : detail
                     ? `This version ${detail.check.errors.join('; ')}.`
-                    : 'Loading…'}
+                    : detailError
+                      ? 'This version could not be loaded.'
+                      : 'Loading…'}
               </p>
               <div className="mt-4 flex flex-col gap-2">
                 <Button variant="primary" isDisabled={busy || !canApprove} onPress={() => void approve()} data-testid="plan-approve" fullWidth>

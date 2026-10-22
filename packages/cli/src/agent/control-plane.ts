@@ -216,6 +216,8 @@ export interface RunRecord {
   screenshots?: string[]
   /** The feedback loops (gate tiers) the run exercised. */
   gateTiers?: string[]
+  /** Subjects of the run's commits — the PRD task names — for the digest. */
+  commitSubjects?: string[]
 }
 
 export async function reportRun(record: RunRecord): Promise<boolean> {

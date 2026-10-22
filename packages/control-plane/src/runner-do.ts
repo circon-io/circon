@@ -25,11 +25,47 @@ export interface RunnerState {
   costUsd?: number
   lastSeenAt?: string
   startedAt?: string
+  /** The machine itself, as `circon agent` last measured it. */
+  health?: MachineHealth
+}
+
+export interface MachineHealth {
+  diskFreeGb: number | null
+  diskTotalGb: number | null
+  loadPerCore: number | null
+  gpu: { name: string; utilization: number; memoryUsedMb: number; memoryTotalMb: number; temperatureC: number } | null
+  ollama: boolean
+  checkedAt: string
+}
+
+/** Only the fields the dashboard shows, as the types it expects: a runner is trusted with its own card, not with arbitrary JSON in it. */
+export function cleanHealth(raw: unknown): MachineHealth | null {
+  if (!raw || typeof raw !== 'object') return null
+  const h = raw as Record<string, unknown>
+  const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null)
+  const g = h['gpu'] && typeof h['gpu'] === 'object' ? (h['gpu'] as Record<string, unknown>) : null
+  return {
+    diskFreeGb: num(h['diskFreeGb']),
+    diskTotalGb: num(h['diskTotalGb']),
+    loadPerCore: num(h['loadPerCore']),
+    gpu: g && typeof g['name'] === 'string'
+      ? {
+          name: g['name'].slice(0, 80),
+          utilization: num(g['utilization']) ?? 0,
+          memoryUsedMb: num(g['memoryUsedMb']) ?? 0,
+          memoryTotalMb: num(g['memoryTotalMb']) ?? 0,
+          temperatureC: num(g['temperatureC']) ?? 0,
+        }
+      : null,
+    ollama: h['ollama'] === true,
+    checkedAt: new Date().toISOString(),
+  }
 }
 
 type Inbound =
   | { type: 'hello'; cliVersion?: string; platform?: string; conventionsRef?: string }
   | { type: 'heartbeat'; state: Partial<RunnerState> }
+  | { type: 'health'; health: unknown }
   | { type: 'log'; lines: string[] }
   | { type: 'run-started'; runId: string; project: string; branch: string }
   | { type: 'run-finished'; runId: string; outcome: string; costUsd: number; prUrl?: string }
@@ -40,7 +76,7 @@ type Outbound =
   | { type: 'command'; command: 'stop' | 'run' }
   | { type: 'config-changed' }
   | { type: 'prd-changed'; project: string }
-  | { type: 'secrets-changed'; project: string }
+  | { type: 'secrets-changed'; project?: string }
 
 export class RunnerDO extends DurableObject<Env> {
   private logs: string[] = []
@@ -96,7 +132,9 @@ export class RunnerDO extends DurableObject<Env> {
     switch (message.type) {
       case 'hello':
       case 'heartbeat': {
-        const patch = message.type === 'heartbeat' ? message.state : {}
+        const patch: Partial<RunnerState> = message.type === 'heartbeat' ? { ...message.state } : {}
+        // Health arrives on its own message, where it is cleaned.
+        delete patch.health
         const previous = await this.currentState()
         this.state = {
           ...previous,
@@ -120,6 +158,15 @@ export class RunnerDO extends DurableObject<Env> {
         // A missed heartbeat is what makes a runner show as offline, so an
         // alarm is scheduled rather than relying on the dashboard polling.
         await this.ctx.storage.setAlarm(Date.now() + OFFLINE_AFTER_MS)
+        this.broadcast({ type: 'state', state: this.state }, 'observer')
+        break
+      }
+
+      case 'health': {
+        const health = cleanHealth(message.health)
+        if (!health) break
+        this.state = { ...(await this.currentState()), health }
+        await this.ctx.storage.put('state', this.state)
         this.broadcast({ type: 'state', state: this.state }, 'observer')
         break
       }

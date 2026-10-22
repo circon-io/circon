@@ -1,13 +1,14 @@
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
-import { run, which } from '../core/exec.ts'
+import { run } from '../core/exec.ts'
+import { machineHealth } from '../core/machine.ts'
 import { ui } from '../core/ui.ts'
 import { paths } from '../core/paths.ts'
 import { readTasks } from '../agent/progress.ts'
 import { spentToday, usd } from '../agent/spend.ts'
 
 /**
- * The daily digest. Reports what was *built*, not just how many commits landed —
+ * This machine's digest. Reports what was *built*, not just how many commits landed —
  * commit subjects carry the PRD task name, so the list reads as work done.
  */
 
@@ -78,36 +79,16 @@ async function activityFor(dir: string, since: string): Promise<ProjectActivity 
   }
 }
 
-async function machineHealth(): Promise<string[]> {
+async function machineLines(): Promise<string[]> {
+  const h = await machineHealth()
   const lines: string[] = []
-
-  const df = await run('df', ['-h', process.env['HOME'] ?? '/'])
-  const dfLine = df.stdout.split('\n')[1]?.trim().split(/\s+/)
-  if (dfLine && dfLine.length >= 5) {
-    lines.push(`- Disk: ${dfLine[3]} free of ${dfLine[1]} (${dfLine[4]} used)`)
+  if (h.diskFreeGb !== null && h.diskTotalGb !== null) lines.push(`- Disk: ${h.diskFreeGb} GB free of ${h.diskTotalGb} GB`)
+  lines.push(`- Load: ${Math.round(h.loadPerCore * 100)}% of all cores`)
+  if (h.gpu) {
+    const g = h.gpu
+    lines.push(`- GPU: ${g.name} | ${g.utilization}% util | ${g.memoryUsedMb}/${g.memoryTotalMb} MiB | ${g.temperatureC}C`)
   }
-
-  // `$` without the m flag will not match before the trailing newline, which
-  // silently dropped this line entirely. Linux says "load average", macOS says
-  // "load averages" — accept both.
-  const uptime = await run('uptime', [])
-  const load = uptime.stdout.match(/load averages?:\s*(.+)$/m)
-  if (load?.[1]) lines.push(`- Load: ${load[1].trim()}`)
-
-  if (await which('nvidia-smi')) {
-    const gpu = await run('nvidia-smi', [
-      '--query-gpu=name,utilization.gpu,memory.used,memory.total,temperature.gpu',
-      '--format=csv,noheader,nounits',
-    ])
-    const first = gpu.stdout.trim().split('\n')[0]?.split(',').map((s) => s.trim())
-    if (first && first.length >= 5) {
-      lines.push(`- GPU: ${first[0]} | ${first[1]}% util | ${first[2]}/${first[3]} MiB | ${first[4]}C`)
-    }
-  }
-
-  const ollama = await run('systemctl', ['is-active', '--quiet', 'ollama'])
-  lines.push(`- Ollama: ${ollama.ok ? 'running' : 'STOPPED'}`)
-
+  lines.push(`- Ollama: ${h.ollama ? 'running' : 'STOPPED'}`)
   return lines
 }
 
@@ -146,11 +127,11 @@ export async function reportCommand(opts: { stdout?: boolean } = {}): Promise<nu
   const today = spentToday()
   if (today > 0) lines.push('', `💷 Spent today: ${usd(today)}`)
 
-  lines.push('', '🖥️ Machine', ...(await machineHealth()))
+  lines.push('', '🖥️ Machine', ...(await machineLines()))
   const report = lines.join('\n')
 
-  // Telegram was dropped in favor of the dashboard; until that exists the
-  // report is printed, and the systemd timer captures it into the journal.
+  // The fleet-wide digest lives in the dashboard, built from what every runner
+  // reports; this is the view from this one machine.
   ui.info(report)
   return 0
 }

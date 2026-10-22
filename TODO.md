@@ -142,11 +142,13 @@ There are two gates because they answer different questions:
 - [x] A runner receives only the secrets for the project it was dispatched for
 - [x] Held in memory, injected into the agent and gate environments, dropped at
       job end
-- [x] Rotation: change it centrally, and runners pick it up at the next job
+- [x] Rotation: change it centrally, and a running job picks it up at its next
+      iteration boundary (`secrets-changed`); a machine secret reaches every job
 - [x] The agent asks for credentials it lacks: a `NEEDS-SECRET: NAME — reason`
       line in its notes becomes a request in the dashboard's Requests inbox.
-      Answering it stores a project secret and pushes `secrets-changed`; the
-      run picks the value up at the next iteration boundary, without a restart
+      Storing that name, from the inbox or the Secrets list, answers the
+      request and pushes `secrets-changed`; the run picks the value up at the
+      next iteration boundary, without a restart
 
 **Why an inbox and not a failure:** a missing Stripe key is not a bug the agent
 can fix. Before this it either stubbed the integration or burned iterations on
@@ -207,8 +209,17 @@ local change.
 - [ ] On real hardware: an Android emulator run on a Mac, a simulator run, and
       a USB iPhone on Linux. The flows parse and the web flow ran end to end
       locally, but no device flow has met a device yet
-- [ ] The daily report on macOS (launchd calendar interval); it is Linux-only
-      for now
+- [x] The daily report moved to the control plane: runners send their commit
+      subjects with each run and a health snapshot (disk, GPU, Ollama, load)
+      every ten minutes. The overview shows "Last 24 hours" across every
+      runner, and each runner card shows its health. The systemd timer is gone;
+      `circon report` remains as this machine's local view
+
+**Why the report moved:** it was a systemd timer that printed one machine's git
+log into the journal at 20:00. Nobody read the journal, the machine had to be
+awake, and there was no macOS version. The control plane already had every run;
+the commit subjects are the PRD task names, so "what was built today" became a
+query rather than a second scheduler to port.
 
 **The constraint, written here so it is not re-derived:**
 - The iOS Simulator is macOS-only.

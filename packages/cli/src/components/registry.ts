@@ -10,7 +10,7 @@ import {
   context7Component,
 } from './ai.ts'
 import {
-  workspaceComponent, conventionsComponent, dailyReportComponent, agentServiceComponent,
+  workspaceComponent, conventionsComponent, agentServiceComponent,
 } from './workspace.ts'
 import {
   homebrewComponent, javaComponent, xcodeComponent, iosSimulatorComponent, iosDeviceComponent,
@@ -45,7 +45,6 @@ export const components: Component[] = [
   shellEnvComponent,
   sysctlComponent,
   gitIdentityComponent,
-  dailyReportComponent,
   agentServiceComponent,
 ]
 

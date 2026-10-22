@@ -1,10 +1,10 @@
 'use client'
 
-import { useCallback } from 'react'
+import { useCallback, useEffect } from 'react'
 import NextLink from 'next/link'
 import {
   ago, money, percent, repoName, useApi,
-  type Overview, type Project, type Run, type Runner, type SecretRequest,
+  type Digest, type Overview, type Project, type Run, type Runner, type SecretRequest,
 } from '@/lib/api'
 import { useData } from '@/lib/use-data'
 import { Card, CardHeader, EmptyState, Mono, PageHeader, Skeleton, Stat } from '@/components/ui/primitives'
@@ -12,40 +12,65 @@ import { RunnerBadge } from '@/components/ui/status'
 import { RunTable } from '@/components/runs/run-table'
 import { Onboarding } from '@/components/onboarding'
 import {
-  BranchIcon, ChevronRightIcon, DollarIcon, InboxIcon, KeyIcon, PlayIcon, ServerIcon, SparklesIcon,
+  BranchIcon, CheckIcon, ChevronRightIcon, DollarIcon, InboxIcon, KeyIcon, PlayIcon, PullRequestIcon, ServerIcon, SparklesIcon,
 } from '@/components/ui/icons'
 
-interface Everything {
+interface Live {
   overview: Overview
   runners: Runner[]
+}
+
+interface Lists {
   runs: Run[]
   projects: Project[]
   integrations: number
   requests: SecretRequest[]
+  digest: Digest
 }
+
+type Everything = Live & Lists
 
 export default function OverviewPage() {
   const api = useApi()
-  const load = useCallback(
+  // What moves by the second polls fast; the lists poll slowly, and reload as
+  // soon as a live count says they changed.
+  const loadLive = useCallback(
+    () =>
+      Promise.all([api<Overview>('/api/overview'), api<{ runners: Runner[] }>('/api/runners')]).then(([overview, r]) => ({
+        overview,
+        runners: r.runners,
+      })),
+    [api],
+  )
+  const loadLists = useCallback(
     () =>
       Promise.all([
-        api<Overview>('/api/overview'),
-        api<{ runners: Runner[] }>('/api/runners'),
         api<{ runs: Run[] }>('/api/runs?limit=8'),
         api<{ projects: Project[] }>('/api/projects'),
         api<{ integrations: Array<{ revoked_at: string | null }> }>('/api/integrations'),
         api<{ requests: SecretRequest[] }>('/api/requests?status=pending'),
-      ]).then(([overview, r, runs, p, i, q]) => ({
-        overview,
-        runners: r.runners,
+        api<Digest>('/api/digest?hours=24'),
+      ]).then(([runs, p, i, q, digest]) => ({
         runs: runs.runs,
         projects: p.projects,
         integrations: i.integrations.filter((x) => !x.revoked_at).length,
         requests: q.requests,
+        digest,
       })),
     [api],
   )
-  const { data, error } = useData<Everything>(load, { intervalMs: 5000 })
+  const live = useData<Live>(loadLive, { intervalMs: 5_000 })
+  const lists = useData<Lists>(loadLists, { intervalMs: 30_000 })
+
+  const o = live.data?.overview
+  const signature = o ? `${o.running}/${o.runsLast7d}/${o.pendingRequests}/${o.plansAwaitingApproval}` : null
+  const { reload: reloadLists } = lists
+  useEffect(() => {
+    if (signature) reloadLists()
+  }, [signature, reloadLists])
+
+  const error = live.error ?? lists.error
+  const data: Everything | null = live.data && lists.data ? { ...live.data, ...lists.data } : null
 
   return (
     <>
@@ -121,6 +146,8 @@ function OverviewBody({ data }: { data: Everything }) {
               </ul>
             )}
           </Card>
+
+          <DigestCard digest={data.digest} />
 
           <Card>
             <CardHeader
@@ -202,5 +229,63 @@ function OverviewBody({ data }: { data: Everything }) {
         </div>
       </div>
     </div>
+  )
+}
+
+/** The daily report: what got built in the last day, across every runner. */
+function DigestCard({ digest }: { digest: Digest }) {
+  const { totals, projects } = digest
+  return (
+    <Card>
+      <CardHeader
+        title="Last 24 hours"
+        description={
+          totals.runs
+            ? `${totals.built} ${totals.built === 1 ? 'task' : 'tasks'} built in ${totals.runs} ${totals.runs === 1 ? 'run' : 'runs'} · ${money(totals.costUsd)}`
+            : 'What the runners built, across every machine.'
+        }
+      />
+      {projects.length === 0 ? (
+        <EmptyState compact icon={<SparklesIcon />} title="Nothing was built today">
+          Runs show up here with the tasks they completed.
+        </EmptyState>
+      ) : (
+        <ul className="flex flex-col divide-y divide-separator">
+          {projects.map((p) => (
+            <li key={p.slug} className="py-4 first:pt-0 last:pb-0">
+              <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+                <span className="text-sm font-semibold">{repoName(p.slug)}</span>
+                <span className="text-xs text-muted tabular-nums">
+                  {p.runs} {p.runs === 1 ? 'run' : 'runs'} · {money(p.costUsd)}
+                </span>
+              </div>
+              {p.built.length > 0 ? (
+                <ul className="mt-2 flex flex-col gap-1.5">
+                  {p.built.map((task) => (
+                    <li key={task} className="flex items-start gap-2 text-sm">
+                      <CheckIcon className="mt-0.5 size-3.5 shrink-0 text-success" />
+                      <span className="min-w-0">{task}</span>
+                    </li>
+                  ))}
+                  {p.moreBuilt > 0 && <li className="pl-5.5 text-xs text-muted">and {p.moreBuilt} more</li>}
+                </ul>
+              ) : (
+                <p className="mt-1.5 text-sm text-muted">No task completed{p.outcomes['running'] ? ' yet — a run is still going' : ''}.</p>
+              )}
+              {p.pullRequests.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-3">
+                  {p.pullRequests.map((pr) => (
+                    <a key={pr.url} href={pr.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs text-muted hover:text-foreground">
+                      <PullRequestIcon className="size-3.5" />
+                      #{pr.url.split('/').pop()} {pr.state ?? ''}
+                    </a>
+                  ))}
+                </div>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
   )
 }

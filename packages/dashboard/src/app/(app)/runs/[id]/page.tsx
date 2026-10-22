@@ -1,12 +1,12 @@
 'use client'
 
-import { useCallback, useEffect } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import NextLink from 'next/link'
 import { Button } from '@heroui/react'
 import { ago, duration, money, repoName, useApi, type RunDetail, type RunnerState } from '@/lib/api'
 import { useData } from '@/lib/use-data'
-import { Badge, Card, CardHeader, KeyValues, Mono, PageHeader, Skeleton, cx } from '@/components/ui/primitives'
+import { Badge, Card, CardHeader, KeyValues, Mono, Notice, PageHeader, Skeleton, cx } from '@/components/ui/primitives'
 import { OutcomeBadge, PrBadge } from '@/components/ui/status'
 import { LogView } from '@/components/runs/log-view'
 import { useLiveLogs } from '@/components/live-logs'
@@ -27,10 +27,11 @@ export default function RunPage() {
   if (error && !data) return <p className="text-sm text-danger" role="alert">{error}</p>
   if (!data) return <Skeleton className="h-96" />
   const { run, live } = data
-  const running = run.outcome === 'running'
-
-  const stop = () =>
-    void api(`/api/runners/${run.runner_id}/command`, { method: 'POST', body: JSON.stringify({ command: 'stop' }) })
+  // `live` is set only while this run is the one its runner is on. A record
+  // left at "running" by a killed process must not stop, or stream, whatever
+  // that runner is doing now.
+  const running = Boolean(live)
+  const orphaned = run.outcome === 'running' && !live
 
   return (
     <>
@@ -56,12 +57,7 @@ export default function RunPage() {
         }
         actions={
           <>
-            {running && (
-              <Button variant="danger-soft" size="sm" onPress={stop}>
-                <StopIcon className="size-3.5" />
-                Stop after this iteration
-              </Button>
-            )}
+            {running && <StopButton runnerId={run.runner_id} />}
             {run.pr_url && (
               <a
                 href={run.pr_url}
@@ -96,7 +92,7 @@ export default function RunPage() {
 
         <div className="grid gap-6 lg:grid-cols-5">
           <Card className="lg:col-span-3">
-            <CardHeader icon={<LoopIcon />} title="Feedback loops" description="Every commit in this run passed these, in this order." />
+            <CardHeader icon={<LoopIcon />} title="Feedback loops" description="The loops this run's iterations went through. Every commit passed all of them." />
             <ol className="flex flex-col gap-2">
               {TIERS.map((tier) => {
                 const ran = (run.gate_tiers ?? []).includes(tier.id)
@@ -146,9 +142,48 @@ export default function RunPage() {
           </Card>
         </div>
 
+        {orphaned && (
+          <Notice tone="warning">
+            This run stopped reporting before it finished. Its runner went offline or moved on to other work, so its outcome was never recorded.
+          </Notice>
+        )}
+
+        {(run.commit_subjects?.length ?? 0) > 0 && (
+          <Card>
+            <CardHeader icon={<BranchIcon />} title="Commits" description="Newest first. Each completed task is one feat: commit." />
+            <ul className="flex flex-col gap-1.5">
+              {run.commit_subjects?.map((subject, i) => (
+                <li key={i} className={cx('truncate text-sm', subject.startsWith('chore:') && 'text-muted')}>
+                  <Mono>{subject}</Mono>
+                </li>
+              ))}
+            </ul>
+          </Card>
+        )}
+
         {running && <LiveOutput runnerId={run.runner_id} />}
       </div>
     </>
+  )
+}
+
+function StopButton({ runnerId }: { runnerId: string }) {
+  const api = useApi()
+  const [state, setState] = useState<'idle' | 'sending' | 'sent' | 'failed'>('idle')
+  const stop = async () => {
+    setState('sending')
+    try {
+      await api(`/api/runners/${runnerId}/command`, { method: 'POST', body: JSON.stringify({ command: 'stop' }) })
+      setState('sent')
+    } catch {
+      setState('failed')
+    }
+  }
+  return (
+    <Button variant="danger-soft" size="sm" onPress={() => void stop()} isDisabled={state === 'sending' || state === 'sent'}>
+      <StopIcon className="size-3.5" />
+      {state === 'sent' ? 'Stopping after this iteration' : state === 'failed' ? 'Could not reach the runner — try again' : 'Stop after this iteration'}
+    </Button>
   )
 }
 

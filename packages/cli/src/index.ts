@@ -29,7 +29,7 @@ Projects
   circon verify [reason]           Claude Code review of the recent diff
 
 Reporting
-  circon report [--stdout]         daily digest
+  circon report [--stdout]         this machine's activity and health
   circon gc [--dry-run]            reclaim disk: old logs, merged run branches
 
   circon --version

@@ -3,14 +3,14 @@
 import { useState } from 'react'
 import NextLink from 'next/link'
 import { Button } from '@heroui/react'
-import { ago, money, repoName, useApi, type Runner } from '@/lib/api'
-import { Badge, Card, Mono } from '../ui/primitives'
+import { ago, money, repoName, useApi, type MachineHealth, type Runner } from '@/lib/api'
+import { Badge, Card, Mono, cx } from '../ui/primitives'
 import { RunnerBadge } from '../ui/status'
 import { Dialog } from '../ui/dialog'
 import { ConfigForm } from '../config/config-form'
 import { LogView } from '../runs/log-view'
 import { useLiveLogs } from '../live-logs'
-import { AppleIcon, BranchIcon, CpuIcon, SettingsIcon, StopIcon, TerminalIcon } from '../ui/icons'
+import { AlertIcon, AppleIcon, BranchIcon, CpuIcon, SettingsIcon, StopIcon, TerminalIcon } from '../ui/icons'
 
 export function RunnerCard({ runner, newestCli, onChanged }: { runner: Runner; newestCli: string | null; onChanged: () => void }) {
   const api = useApi()
@@ -83,6 +83,7 @@ export function RunnerCard({ runner, newestCli, onChanged }: { runner: Runner; n
           </Button>
         </div>
       </div>
+      {runner.state?.health && <HealthStrip health={runner.state.health} />}
       {logsOpen && (
         <div className="border-t border-separator p-5">
           <LogView lines={logs.lines} />
@@ -103,5 +104,29 @@ export function RunnerCard({ runner, newestCli, onChanged }: { runner: Runner; n
         <ConfigForm endpoint={`/api/runners/${runner.id}/config`} sections={['loops', 'agents', 'budgets']} inheritsFrom="org default" inDialog />
       </Dialog>
     </Card>
+  )
+}
+
+/** Under this much free disk an Android system image or a model pull fails part-way. */
+const LOW_DISK_GB = 20
+
+function HealthStrip({ health }: { health: MachineHealth }) {
+  const { diskFreeGb, diskTotalGb, gpu, loadPerCore, ollama } = health
+  const lowDisk = diskFreeGb !== null && (diskFreeGb < LOW_DISK_GB || (diskTotalGb ? diskFreeGb / diskTotalGb < 0.1 : false))
+  const items: Array<{ label: string; warn?: boolean }> = []
+  if (diskFreeGb !== null) items.push({ label: `${Math.round(diskFreeGb)} GB free${diskTotalGb ? ` of ${Math.round(diskTotalGb)}` : ''}`, warn: lowDisk })
+  if (gpu) items.push({ label: `${gpu.name.replace(/^NVIDIA (GeForce )?/, '')} · ${gpu.utilization}% · ${gpu.temperatureC}°C`, warn: gpu.temperatureC >= 85 })
+  if (loadPerCore !== null) items.push({ label: `CPU ${Math.round(loadPerCore * 100)}%` })
+  items.push({ label: ollama ? 'Ollama running' : 'Ollama stopped' })
+  return (
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-separator px-5 py-2.5 text-xs text-muted">
+      {items.map((item) => (
+        <span key={item.label} className={cx('inline-flex items-center gap-1', item.warn && 'font-medium text-warning')}>
+          {item.warn && <AlertIcon className="size-3.5" />}
+          {item.label}
+        </span>
+      ))}
+      <span className="ml-auto">checked {ago(health.checkedAt)}</span>
+    </div>
   )
 }

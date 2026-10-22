@@ -4,6 +4,7 @@ import { readEnrollment, claimJob, socketUrl, fetchConfig } from '../agent/contr
 import { readLock, requestStop } from '../agent/lock.ts'
 import { BatchedChannel, type Outbound } from '../agent/channel.ts'
 import { currentRef } from '../core/conventions.ts'
+import { machineHealth } from '../core/machine.ts'
 import { jobCommand } from './job.ts'
 import { cliVersion } from './update.ts'
 import type { RefreshSignals } from './run.ts'
@@ -19,6 +20,8 @@ import type { RefreshSignals } from './run.ts'
 
 const HEARTBEAT_MS = 30_000
 const CLAIM_INTERVAL_MS = 15_000
+// Disk and GPU change slowly, and nvidia-smi is not free.
+const HEALTH_INTERVAL_MS = 10 * 60_000
 
 function backoff(attempt: number): number {
   return Math.min(5_000 * 2 ** Math.max(0, attempt - 1), 120_000)
@@ -28,7 +31,7 @@ type Inbound =
   | { type: 'command'; command: 'stop' | 'run' }
   | { type: 'config-changed' }
   | { type: 'prd-changed'; project: string }
-  | { type: 'secrets-changed'; project: string }
+  | { type: 'secrets-changed'; project?: string }
 
 /**
  * Changes the dashboard made while a run was going. The loop takes them at its
@@ -47,7 +50,8 @@ export class PendingRefresh implements RefreshSignals {
   note(message: Inbound): void {
     if (message.type === 'config-changed') this.config = true
     if (message.type === 'prd-changed' && message.project === this.project()) this.prd = true
-    if (message.type === 'secrets-changed' && message.project === this.project()) this.secrets = true
+    // No project means a machine secret, which every project's job receives.
+    if (message.type === 'secrets-changed' && (!message.project || message.project === this.project())) this.secrets = true
   }
 
   take(): { config: boolean; prd: boolean; secrets: boolean } {
@@ -91,6 +95,11 @@ export async function agentCommand(): Promise<number> {
       platform: `${process.platform} ${hostname()}`,
       conventionsRef: (await currentRef()) ?? undefined,
     })
+    await reportHealth()
+  }
+
+  const reportHealth = async () => {
+    send({ type: 'health', health: await machineHealth() })
   }
 
   const refresh = new PendingRefresh(() => running)
@@ -183,6 +192,7 @@ export async function agentCommand(): Promise<number> {
   }, HEARTBEAT_MS)
 
   const poll = setInterval(() => void claimNow(), CLAIM_INTERVAL_MS)
+  const health = setInterval(() => void reportHealth(), HEALTH_INTERVAL_MS)
 
   // Runs until killed by systemd or Ctrl-C.
   await new Promise<void>((resolve) => {
@@ -190,6 +200,7 @@ export async function agentCommand(): Promise<number> {
       stopping = true
       clearInterval(heartbeat)
       clearInterval(poll)
+      clearInterval(health)
       socket?.close()
       ui.info('Agent stopped.')
       resolve()

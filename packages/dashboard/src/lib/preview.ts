@@ -50,12 +50,18 @@ const db = {
     {
       id: 'run_studio', name: 'studio-rtx', platform: 'linux studio', cli_version: '0.3.0', conventions_ref: 'v2.0.0',
       config: { iosRunnerMode: 'device' }, created_at: ago(60 * 24 * 30), last_seen_at: ago(0),
-      state: { status: 'running', project: 'acme__shop', branch: 'circon/run-2026-10-22-a1b2c3', runId: 'run_live01', iteration: 7, costUsd: 1.84, lastSeenAt: ago(0) },
+      state: {
+        status: 'running', project: 'acme__shop', branch: 'circon/run-2026-10-22-a1b2c3', runId: 'run_live01', iteration: 7, costUsd: 1.84, lastSeenAt: ago(0),
+        health: { diskFreeGb: 412.3, diskTotalGb: 915.3, loadPerCore: 0.62, gpu: { name: 'NVIDIA GeForce RTX 3060', utilization: 71, memoryUsedMb: 9120, memoryTotalMb: 12288, temperatureC: 68 }, ollama: true, checkedAt: ago(4) },
+      },
     },
     {
       id: 'run_mini', name: 'mac-mini', platform: 'darwin mac-mini', cli_version: '0.3.0', conventions_ref: 'v2.0.0',
       config: { iosRunnerMode: 'simulator' }, created_at: ago(60 * 24 * 9), last_seen_at: ago(1),
-      state: { status: 'idle', lastSeenAt: ago(1) },
+      state: {
+        status: 'idle', lastSeenAt: ago(1),
+        health: { diskFreeGb: 14.2, diskTotalGb: 228.3, loadPerCore: 0.08, gpu: null, ollama: true, checkedAt: ago(7) },
+      },
     },
     {
       id: 'run_old', name: 'old-thinkpad', platform: 'linux thinkpad', cli_version: '0.2.0', conventions_ref: 'v1.0.0',
@@ -70,8 +76,8 @@ const db = {
   ],
   integrations: [{ id: 'itg_1', provider: 'github', account_login: 'acme', account_type: 'Organization', created_at: ago(60 * 24 * 30), revoked_at: null }],
   runs: [
-    { id: 'run_live01', runner_id: 'run_studio', job_id: 'job_1', project_slug: 'acme__shop', branch: 'circon/run-2026-10-22-a1b2c3', started_at: ago(48), finished_at: null, outcome: 'running', iterations: 6, commits: 5, cost_usd: 1.84, pr_url: null, pr_state: null, failed_tier: null, gate_tiers: ['typecheck', 'unit tests', 'web UI', 'android UI'] },
-    { id: 'run_02', runner_id: 'run_mini', job_id: 'job_2', project_slug: 'acme__shop', branch: 'circon/run-2026-10-21-d4e5f6', started_at: ago(60 * 20), finished_at: ago(60 * 18), outcome: 'complete', iterations: 9, commits: 9, cost_usd: 2.31, pr_url: 'https://github.com/acme/shop/pull/42', pr_state: 'merged', failed_tier: null, gate_tiers: ['typecheck', 'unit tests', 'web UI', 'android UI', 'ios UI'] },
+    { id: 'run_live01', runner_id: 'run_studio', job_id: 'job_1', project_slug: 'acme__shop', branch: 'circon/run-2026-10-22-a1b2c3', started_at: ago(48), finished_at: null, outcome: 'running', iterations: 6, commits: 5, cost_usd: 1.84, pr_url: null, pr_state: null, failed_tier: null, gate_tiers: ['typecheck', 'unit tests', 'web UI', 'android UI'], commit_subjects: ['chore: record Undo a check-off for five seconds', 'feat: Undo a check-off for five seconds', 'feat: Empty state for a new list', 'chore: sync prd', 'feat: Check off an item, synced to every phone'] },
+    { id: 'run_02', runner_id: 'run_mini', job_id: 'job_2', project_slug: 'acme__shop', branch: 'circon/run-2026-10-21-d4e5f6', started_at: ago(60 * 20), finished_at: ago(60 * 18), outcome: 'complete', iterations: 9, commits: 9, cost_usd: 2.31, pr_url: 'https://github.com/acme/shop/pull/42', pr_state: 'merged', failed_tier: null, gate_tiers: ['typecheck', 'unit tests', 'web UI', 'android UI', 'ios UI'], commit_subjects: ['chore: screenshots for review', 'feat: Share the list with a household member by invite link', 'feat: Sign in with email', 'feat: Create a list and add items'] },
     { id: 'run_03', runner_id: 'run_studio', job_id: 'job_3', project_slug: 'acme__bookings', branch: 'circon/run-2026-10-21-0a9b8c', started_at: ago(60 * 26), finished_at: ago(60 * 25), outcome: 'stuck', iterations: 4, commits: 1, cost_usd: 0.92, pr_url: 'https://github.com/acme/bookings/pull/7', pr_state: 'open', failed_tier: 'web UI', gate_tiers: ['typecheck', 'unit tests', 'web UI'] },
     { id: 'run_04', runner_id: 'run_studio', job_id: 'job_4', project_slug: 'acme__shop', branch: 'circon/run-2026-10-20-77aa11', started_at: ago(60 * 46), finished_at: ago(60 * 44), outcome: 'complete', iterations: 12, commits: 11, cost_usd: 3.05, pr_url: 'https://github.com/acme/shop/pull/39', pr_state: 'merged', failed_tier: null, gate_tiers: ['typecheck', 'unit tests', 'web UI', 'android UI'] },
     { id: 'run_05', runner_id: 'run_mini', job_id: 'job_5', project_slug: 'acme__shop', branch: 'circon/run-2026-10-19-5e5e5e', started_at: ago(60 * 70), finished_at: ago(60 * 69), outcome: 'usage-limit', iterations: 3, commits: 2, cost_usd: 0, pr_url: 'https://github.com/acme/shop/pull/37', pr_state: 'closed', failed_tier: null, gate_tiers: ['typecheck', 'unit tests'] },
@@ -141,6 +147,29 @@ export async function previewFetch(path: string, init: RequestInit = {}): Promis
   const seg = p.split('/')
 
   if (p === '/api/overview') return okBody(db.overview)
+  if (p === '/api/digest') {
+    const since = Date.now() - 24 * 3_600_000
+    const recent = db.runs.filter((r) => Date.parse(String(r['started_at'])) >= since || Date.parse(String(r['finished_at'] ?? 0)) >= since)
+    const projects = [...new Set(recent.map((r) => String(r['project_slug'])))].map((slug) => {
+      const runs = recent.filter((r) => r['project_slug'] === slug)
+      const built = [...new Set(runs.flatMap((r) => (r['commit_subjects'] as string[] | undefined) ?? []).filter((s) => !s.startsWith('chore:')).map((s) => s.replace(/^feat: /, '')))]
+      return {
+        slug,
+        runs: runs.length,
+        outcomes: Object.fromEntries(runs.map((r) => [String(r['outcome']), 1])),
+        costUsd: runs.reduce((n, r) => n + Number(r['cost_usd']), 0),
+        built,
+        moreBuilt: 0,
+        pullRequests: runs.filter((r) => r['pr_url']).map((r) => ({ url: String(r['pr_url']), state: r['pr_state'] as string | null })),
+      }
+    })
+    return okBody({
+      since: new Date(since).toISOString(),
+      hours: 24,
+      projects,
+      totals: { runs: recent.length, built: projects.reduce((n, x) => n + x.built.length, 0), costUsd: projects.reduce((n, x) => n + x.costUsd, 0) },
+    })
+  }
   if (p === '/api/runners') return okBody({ runners: db.runners })
   if (p === '/api/runs') {
     const project = url.searchParams.get('project')
@@ -179,16 +208,16 @@ export async function previewFetch(path: string, init: RequestInit = {}): Promis
   }
   if (p === '/api/settings') {
     if (method === 'POST') db.settings = (body['config'] as Record<string, unknown>) ?? {}
-    return okBody({ config: db.settings })
+    return okBody({ config: db.settings, inherited: {} })
   }
   if (/^\/api\/runners\/[^/]+\/config$/.test(p)) {
     const runner = db.runners.find((r) => r.id === seg[3])
     if (runner && method === 'POST') runner.config = (body['config'] as typeof runner.config) ?? {}
-    return okBody({ config: runner?.config ?? {} })
+    return okBody({ config: runner?.config ?? {}, inherited: db.settings })
   }
   if (/^\/api\/projects\/[^/]+\/config$/.test(p)) {
     if (method === 'POST') db.projectConfig[seg[3] ?? ''] = (body['config'] as Record<string, unknown>) ?? {}
-    return okBody({ config: db.projectConfig[seg[3] ?? ''] ?? {} })
+    return okBody({ config: db.projectConfig[seg[3] ?? ''] ?? {}, inherited: db.settings })
   }
   if (/^\/api\/projects\/[^/]+\/plans$/.test(p)) {
     const plans = db.plans[seg[3] ?? ''] ?? []

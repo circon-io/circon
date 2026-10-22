@@ -48,7 +48,7 @@ control plane open, reports heartbeats and live logs, and claims queued jobs.
 | **Mobile** | Node 24, pnpm, Expo tooling, Android Studio, a headless Android SDK and a ready emulator |
 | **Containers** | Docker Engine, plus KVM for hardware-accelerated emulation |
 | **Remote** | OpenSSH |
-| **Service** | `circon agent` as a systemd user service, plus a daily report timer |
+| **Service** | `circon agent` as a systemd user service (launchd on a Mac) |
 
 Android is provisioned headlessly, with no setup wizard and no manual SDK
 downloads. An AVD named `circon_pixel` is created, and the gate boots it when it
@@ -184,7 +184,7 @@ the iOS simulator can't run on Linux.
 | `circon status` | Show tasks done and open in this project |
 | `circon stop` | Stop the loop cleanly, between iterations |
 | `circon verify [reason]` | Run a Claude Code review of the recent diff |
-| `circon report [--stdout]` | Show the daily digest |
+| `circon report [--stdout]` | This machine's activity and health; the fleet-wide digest is on the dashboard |
 | `circon gc [--dry-run]` | Reclaim disk: old logs, merged run branches |
 
 ## Configuration

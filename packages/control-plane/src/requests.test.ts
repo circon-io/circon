@@ -2,7 +2,7 @@ import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
 import { fakeEnv, seedRunner, seedProject } from '../test/fakes.ts'
 import { createRequest, listRequests, fulfillRequest, dismissRequest } from './requests.ts'
-import { secretsForJob } from './secrets.ts'
+import { secretsForJob, putSecret } from './secrets.ts'
 import { claimJob, queueJob, recordRun, overview, listRuns } from './fleet.ts'
 
 const ORG = 'org_a'
@@ -70,6 +70,27 @@ describe('agent requests', () => {
     assert.equal(res.status, 400)
   })
 
+  test('adding the key on the Secrets list answers the request and tells the runner', async () => {
+    const { env, sent } = setup()
+    await createRequest(post({ project: 'acme__shop', name: 'MAPS_KEY', reason: 'x' }), env, ORG)
+    await data(await putSecret(post({ scope: 'project', projectId: 'prj_acme__shop', name: 'MAPS_KEY', value: 'k' }), env, ORG, 'owner'))
+    const after = await data<{ requests: Row[] }>(await listRequests(env, ORG, new URL('https://x/api/requests')))
+    assert.equal(after.requests[0]?.status, 'fulfilled')
+    assert.ok(sent.some((s) => JSON.stringify(s.body) === JSON.stringify({ type: 'secrets-changed', project: 'acme__shop' })))
+  })
+
+  test('a machine secret answers that name in every project, and reaches every job', async () => {
+    const { env, db, sent } = setup()
+    seedProject(db, { org: ORG, slug: 'acme__blog' })
+    await createRequest(post({ project: 'acme__shop', name: 'SENTRY_DSN', reason: 'x' }), env, ORG)
+    await createRequest(post({ project: 'acme__blog', name: 'SENTRY_DSN', reason: 'x' }), env, ORG)
+    await createRequest(post({ project: 'acme__blog', name: 'MAPS_KEY', reason: 'x' }), env, ORG)
+    await data(await putSecret(post({ scope: 'machine', name: 'SENTRY_DSN', value: 'dsn' }), env, ORG, 'owner'))
+    const open = await data<{ requests: Row[] }>(await listRequests(env, ORG, new URL('https://x/api/requests?status=pending')))
+    assert.deepEqual(open.requests.map((r) => r.name), ['MAPS_KEY'])
+    assert.ok(sent.some((s) => JSON.stringify(s.body) === JSON.stringify({ type: 'secrets-changed' })))
+  })
+
   test("another org's request cannot be answered or dismissed", async () => {
     const { env } = setup()
     await createRequest(post({ project: 'acme__shop', name: 'MAPS_KEY', reason: 'x' }), env, ORG)
@@ -107,5 +128,14 @@ describe('overview', () => {
     assert.equal(o.successRate7d, 0.5)
     assert.equal(o.spentLast24h, 3)
     assert.equal(o.pendingRequests, 1)
+  })
+
+  test('stops, usage limits and broken machines do not count against the success rate', async () => {
+    const { env } = setup()
+    for (const [i, outcome] of ['complete', 'stopped', 'usage-limit', 'infrastructure'].entries()) {
+      await data(await recordRun(post({ runId: `r${i}`, projectSlug: 'acme__shop', outcome }), env, 'run_a', ORG))
+    }
+    const o = await data<{ successRate7d: number | null }>(await overview(env, ORG))
+    assert.equal(o.successRate7d, 1)
   })
 })

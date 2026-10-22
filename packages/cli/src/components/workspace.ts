@@ -75,37 +75,6 @@ export const conventionsComponent: Component = {
   },
 }
 
-export const dailyReportComponent: Component = {
-  id: 'daily-report',
-  summary: 'Daily digest timer (systemd --user)',
-  platforms: ['linux'],
-
-  async check() {
-    const r = await run('systemctl', ['--user', 'is-enabled', 'circon-report.timer'])
-    return r.ok ? ok('enabled') : missing('not enabled')
-  },
-
-  async install() {
-    const unitDir = join(process.env['HOME'] ?? '', '.config', 'systemd', 'user')
-    mkdirSync(unitDir, { recursive: true })
-
-    const bin = (await which('circon')) ?? 'circon'
-    writeFileSync(
-      join(unitDir, 'circon-report.service'),
-      `[Unit]\nDescription=circon daily activity report\n\n[Service]\nType=oneshot\nExecStart=${bin} report\n`,
-    )
-    writeFileSync(
-      join(unitDir, 'circon-report.timer'),
-      `[Unit]\nDescription=Send the circon daily activity report\n\n[Timer]\nOnCalendar=*-*-* 20:00:00\nPersistent=true\n\n[Install]\nWantedBy=timers.target\n`,
-    )
-
-    await run('systemctl', ['--user', 'daemon-reload'])
-    const enable = await run('systemctl', ['--user', 'enable', '--now', 'circon-report.timer'])
-    if (!enable.ok) throw new Error('could not enable the report timer (no user session bus?)')
-    await run('sudo', ['loginctl', 'enable-linger', process.env['USER'] ?? ''])
-  },
-}
-
 const LAUNCHD_LABEL = 'io.circon.agent'
 const launchdPlist = () => join(process.env['HOME'] ?? '', 'Library', 'LaunchAgents', `${LAUNCHD_LABEL}.plist`)
 const launchdDomain = () => `gui/${process.getuid?.() ?? 501}`

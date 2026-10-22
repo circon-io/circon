@@ -23,7 +23,7 @@ export type RunnerMessage =
   | { type: 'command'; command: 'run' }
   | { type: 'config-changed' }
   | { type: 'prd-changed'; project: string }
-  | { type: 'secrets-changed'; project: string }
+  | { type: 'secrets-changed'; project?: string }
 
 function runnerStub(env: Env, runnerId: string) {
   return env.RUNNER.get(env.RUNNER.idFromName(runnerId))
@@ -263,8 +263,21 @@ async function readBody(request: Request): Promise<{ config: RunConfig } | Respo
   return { config }
 }
 
+/*
+ * Each layer's GET returns the layer itself and what it inherits, so the form
+ * can show the value in effect: a project or runner switch that hides an org
+ * default it is not overriding would show a state no run will see. A project's
+ * runner is not known until a job is claimed, so a project inherits from the
+ * org as far as the form can tell.
+ */
+
 export async function getSettings(env: Env, org: string): Promise<Response> {
-  return ok({ config: await orgConfig(env, org) })
+  return ok({ config: await orgConfig(env, org), inherited: {} })
+}
+
+export async function getRunnerConfig(env: Env, org: string, runnerId: string): Promise<Response> {
+  if (!(await belongsTo(env, runnerId, org))) return fail('not_found', 'No such runner.', 404)
+  return ok({ config: await storedRunnerConfig(env, runnerId), inherited: await orgConfig(env, org) })
 }
 
 export async function putSettings(
@@ -307,7 +320,7 @@ export async function getProjectConfig(env: Env, org: string, projectId: string)
     .bind(projectId, org)
     .first<{ config: string }>()
   if (!row) return fail('not_found', 'No such project.', 404)
-  return ok({ config: parseStoredConfig(row.config) })
+  return ok({ config: parseStoredConfig(row.config), inherited: await orgConfig(env, org) })
 }
 
 export async function putProjectConfig(
@@ -455,6 +468,8 @@ export async function queueJob(
 
 // ---- runs ------------------------------------------------------------------------
 
+const MAX_SUBJECTS = 50
+
 export async function recordRun(
   request: Request,
   env: Env,
@@ -475,6 +490,7 @@ export async function recordRun(
     agents?: unknown
     screenshots?: unknown
     gateTiers?: unknown
+    commitSubjects?: unknown
   } | null
 
   if (!body?.runId || !body.projectSlug) {
@@ -501,11 +517,16 @@ export async function recordRun(
     ? body.gateTiers.filter((t): t is string => typeof t === 'string' && GATE_TIERS.includes(t))
     : []
 
+  // For the digest, not an archive: enough subjects to say what was built.
+  const subjects = Array.isArray(body.commitSubjects)
+    ? body.commitSubjects.filter((s): s is string => typeof s === 'string' && s.length > 0).slice(0, MAX_SUBJECTS).map((s) => s.slice(0, 200))
+    : []
+
   await env.DB.prepare(
     `INSERT INTO runs (id, runner_id, org, job_id, project_slug, branch, started_at, finished_at,
                        outcome, iterations, commits, cost_usd, pr_url, failed_tier, agents, screenshots,
-                       gate_tiers)
-     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
+                       gate_tiers, commit_subjects)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)
      ON CONFLICT (id) DO UPDATE SET
        finished_at = excluded.finished_at,
        outcome     = excluded.outcome,
@@ -516,7 +537,8 @@ export async function recordRun(
        failed_tier = excluded.failed_tier,
        agents      = COALESCE(excluded.agents, runs.agents),
        screenshots = COALESCE(excluded.screenshots, runs.screenshots),
-       gate_tiers  = COALESCE(excluded.gate_tiers, runs.gate_tiers)
+       gate_tiers  = COALESCE(excluded.gate_tiers, runs.gate_tiers),
+       commit_subjects = COALESCE(excluded.commit_subjects, runs.commit_subjects)
      WHERE runs.runner_id = excluded.runner_id`,
   )
     .bind(
@@ -527,6 +549,7 @@ export async function recordRun(
       body.agents ? JSON.stringify(body.agents) : null,
       screenshots.length ? JSON.stringify(screenshots) : null,
       tiers.length ? JSON.stringify(tiers) : null,
+      subjects.length ? JSON.stringify(subjects) : null,
     )
     .run()
 
@@ -562,7 +585,7 @@ export async function listRuns(env: Env, org: string, url: URL): Promise<Respons
     .bind(org, new Date(Date.now() - 86_400_000).toISOString())
     .first<{ total: number }>()
 
-  return ok({ runs: (rows.results ?? []).map(withTiers), spentLast24h: spend?.total ?? 0 })
+  return ok({ runs: (rows.results ?? []).map(withLists), spentLast24h: spend?.total ?? 0 })
 }
 
 /** One run, plus the runner's live state when this is the run it is on now. */
@@ -592,18 +615,26 @@ export async function getRun(env: Env, org: string, runId: string): Promise<Resp
     agents = null
   }
 
-  return ok({ run: withTiers({ ...run, agents }), live })
+  return ok({ run: withLists({ ...run, agents }), live })
 }
 
-function withTiers(row: Record<string, unknown>): Record<string, unknown> {
-  let tiers: unknown = []
+function jsonList(value: unknown): unknown[] {
   try {
-    tiers = typeof row['gate_tiers'] === 'string' ? JSON.parse(row['gate_tiers']) : []
+    const parsed: unknown = typeof value === 'string' ? JSON.parse(value) : []
+    return Array.isArray(parsed) ? parsed : []
   } catch {
-    tiers = []
+    return []
   }
-  return { ...row, gate_tiers: tiers }
 }
+
+/** The JSON-array columns, parsed; a column the query did not select stays absent. */
+function withLists(row: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...row, gate_tiers: jsonList(row['gate_tiers']) }
+  if ('commit_subjects' in row) out['commit_subjects'] = jsonList(row['commit_subjects'])
+  return out
+}
+
+const NEUTRAL_OUTCOMES = new Set(['running', 'stopped', 'usage-limit', 'infrastructure'])
 
 /**
  * Everything the overview shows in one request: what is running, what it has
@@ -640,8 +671,10 @@ export async function overview(env: Env, org: string): Promise<Response> {
     .first<{ n: number }>()
 
   const byOutcome = Object.fromEntries((outcomes.results ?? []).map((r) => [r.outcome, r.n]))
-  const finished = Object.entries(byOutcome).filter(([o]) => o !== 'running').reduce((s, [, n]) => s + n, 0)
-  const succeeded = (byOutcome['complete'] ?? 0) + (byOutcome['limit'] ?? 0) + (byOutcome['stopped'] ?? 0)
+  // Only runs that said something about the code count. A stop is a person's
+  // choice, and a usage limit or a broken machine is not the code's fault.
+  const finished = Object.entries(byOutcome).filter(([o]) => !NEUTRAL_OUTCOMES.has(o)).reduce((s, [, n]) => s + n, 0)
+  const succeeded = (byOutcome['complete'] ?? 0) + (byOutcome['limit'] ?? 0)
 
   return ok({
     runsLast7d: Object.values(byOutcome).reduce((s, n) => s + n, 0),

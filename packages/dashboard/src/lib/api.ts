@@ -21,6 +21,17 @@ export interface RunnerState {
   iteration?: number
   costUsd?: number
   lastSeenAt?: string
+  health?: MachineHealth
+}
+
+/** The machine itself, as its daemon last measured it (every ten minutes). */
+export interface MachineHealth {
+  diskFreeGb: number | null
+  diskTotalGb: number | null
+  loadPerCore: number | null
+  gpu: { name: string; utilization: number; memoryUsedMb: number; memoryTotalMb: number; temperatureC: number } | null
+  ollama: boolean
+  checkedAt: string
 }
 
 export type AgentBackend = 'aider' | 'claude-code' | 'codex'
@@ -100,6 +111,23 @@ export interface SecretRequest {
 export interface RunDetail extends Run {
   runner_name: string | null
   agents: Partial<Record<AgentRole, RoleSpec>> | null
+  commit_subjects?: string[]
+}
+
+/** What got built across the fleet in a window: the daily report. */
+export interface Digest {
+  since: string
+  hours: number
+  projects: Array<{
+    slug: string
+    runs: number
+    outcomes: Record<string, number>
+    costUsd: number
+    built: string[]
+    moreBuilt: number
+    pullRequests: Array<{ url: string; state: string | null }>
+  }>
+  totals: { runs: number; built: number; costUsd: number }
 }
 
 export class ApiError extends Error {

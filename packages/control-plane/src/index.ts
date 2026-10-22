@@ -11,10 +11,11 @@ import {
 import { entitlementFor, countRunners, hasFeature } from './billing/entitlements.ts'
 import {
   belongsTo, enroll, createEnrollToken, listRunners, runnerConfig, commandRunner,
-  getSettings, putSettings, putRunnerConfig, getProjectConfig, putProjectConfig,
+  getSettings, putSettings, getRunnerConfig, putRunnerConfig, getProjectConfig, putProjectConfig,
   claimJob, queueJob, recordRun, listRuns, getRun, overview,
 } from './fleet.ts'
 import { createRequest, listRequests, fulfillRequest, dismissRequest } from './requests.ts'
+import { digest } from './digest.ts'
 import { listPlans, getPlan, editPlan, streamPlan, approvePlan } from './planning/routes.ts'
 import { releaseReport, approveRelease } from './releases.ts'
 import { listSecrets, putSecret, deleteSecret, secretsForJob } from './secrets.ts'
@@ -162,6 +163,9 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         if (path === '/api/overview' && request.method === 'GET') {
           return await overview(env, principal.org)
         }
+        if (path === '/api/digest' && request.method === 'GET') {
+          return await digest(env, principal.org, url)
+        }
         if (path === '/api/requests' && request.method === 'GET') {
           return await listRequests(env, principal.org, url)
         }
@@ -283,6 +287,9 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
           }
           if (path.endsWith('/command') && request.method === 'POST') {
             return await commandRunner(request, env, principal.org, runnerId)
+          }
+          if (path.endsWith('/config') && request.method === 'GET') {
+            return await getRunnerConfig(env, principal.org, runnerId)
           }
           if (path.endsWith('/config') && request.method === 'POST') {
             return await putRunnerConfig(request, env, principal.org, runnerId)

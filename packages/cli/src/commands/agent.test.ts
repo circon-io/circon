@@ -30,3 +30,11 @@ test('an answered credential request for the running project is picked up', () =
   r.note({ type: 'secrets-changed', project: 'acme__shop' })
   assert.equal(r.take().secrets, true)
 })
+
+test("a machine secret reaches every project's run; another project's secret does not", () => {
+  const r = new PendingRefresh(() => 'acme__shop')
+  r.note({ type: 'secrets-changed', project: 'acme__blog' })
+  assert.equal(r.take().secrets, false)
+  r.note({ type: 'secrets-changed' })
+  assert.equal(r.take().secrets, true)
+})

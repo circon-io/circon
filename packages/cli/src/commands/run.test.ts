@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync, appendFileSync, readFileSync, mkdir
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { execFileSync } from 'node:child_process'
-import { runCommand, type RunDeps } from './run.ts'
+import { LoopTally, runCommand, type RunDeps } from './run.ts'
 import type { AgentBackend, AgentRequest, AgentResult, Backends } from '../agent/backends/index.ts'
 import type { GateResult } from '../agent/gate.ts'
 import type { AgentBackendId } from '../core/config.ts'
@@ -93,6 +93,8 @@ function deps(build: AgentBackend, gate: (n: number) => Partial<GateResult> = ()
     preflight: async () => null,
     sleep: async (ms) => { sleeps.push(ms) },
     collect: async () => [],
+    requestSecret: async () => null,
+    jobSecrets: async () => null,
   }
   return { d, sleeps, gateCount: () => gates }
 }
@@ -285,11 +287,50 @@ describe('the loop', () => {
     assert.equal(subjects().filter((s) => s.startsWith('feat:')).length, 2)
   })
 
+  test('a credential that already exists in the dashboard is loaded before the next iteration', async () => {
+    prd(['add checkout', 'add receipts'])
+    const prompts: string[] = []
+    const seen: Array<string | undefined> = []
+    const { backend: b } = backend('claude-code', (req) => {
+      prompts.push(req.prompt)
+      seen.push(process.env['STRIPE_SECRET_KEY'])
+      appendFileSync(join(req.cwd, 'progress.txt'), 'NEEDS-SECRET: STRIPE_SECRET_KEY — checkout\n')
+      return doesTheTask(req)
+    })
+    const { d } = deps(b)
+    d.requestSecret = async () => 'available'
+    d.jobSecrets = async () => ({ STRIPE_SECRET_KEY: 'sk_test_1' })
+    const code = await runCommand(2, { config: { agents: { build: { backend: 'claude-code' } } }, jobId: 'job_1' }, d)
+    assert.equal(code, 0)
+    assert.deepEqual(seen, [undefined, 'sk_test_1'])
+    assert.doesNotMatch(prompts[1] ?? '', /Still waiting/)
+    delete process.env['STRIPE_SECRET_KEY']
+  })
+
   test('refuses to start when the build backend cannot run', async () => {
     prd(['add a cart'])
     const { backend: b } = backend('claude-code', doesTheTask)
     const broken: AgentBackend = { ...b, available: async () => ({ ok: false, billing: 'api', reason: 'not logged in' }) }
     const code = await runCommand(1, { config: { agents: { build: { backend: 'claude-code' } } } }, deps(broken).d)
     assert.equal(code, 1)
+  })
+})
+
+describe('loop tally', () => {
+  test('a failure a later iteration fixed is not where the run stopped', () => {
+    const t = new LoopTally()
+    t.note({ ok: false, failedTier: 'web UI', ranTiers: ['typecheck', 'unit tests', 'web UI'] })
+    t.note({ ok: true, failedTier: null, ranTiers: ['typecheck', 'unit tests', 'web UI', 'android UI'] })
+    assert.equal(t.failed, null)
+    assert.deepEqual(t.passed, ['typecheck', 'unit tests', 'web UI', 'android UI'])
+  })
+
+  test('an early stop in the last iteration keeps the loops earlier ones reached', () => {
+    const t = new LoopTally()
+    t.note({ ok: true, failedTier: null, ranTiers: ['typecheck', 'unit tests', 'web UI'] })
+    t.note({ ok: false, failedTier: 'typecheck', ranTiers: ['typecheck'] })
+    assert.equal(t.failed, 'typecheck')
+    assert.deepEqual(t.exercised, ['typecheck', 'unit tests', 'web UI'])
+    assert.deepEqual(t.passed, ['typecheck', 'unit tests', 'web UI'])
   })
 })

@@ -35,22 +35,32 @@ const ROLES: Array<{ role: AgentRole; title: string; description: string }> = [
   { role: 'review', title: 'Review', description: 'Reviews the diff every few iterations and after failures. A second vendor catches different mistakes.' },
 ]
 
+/**
+ * A failed load is an error, never an empty layer: saving an empty-looking form
+ * would replace every stored setting at this layer with the one field touched.
+ */
 function useConfig(endpoint: string) {
   const api = useApi()
   const [saved, setSaved] = useState<RunConfig | null>(null)
   const [draft, setDraft] = useState<RunConfig | null>(null)
+  const [inherited, setInherited] = useState<RunConfig>({})
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [attempt, setAttempt] = useState(0)
   useEffect(() => {
-    api<{ config: RunConfig }>(endpoint)
-      .then(({ config }) => {
+    api<{ config: RunConfig; inherited?: RunConfig }>(endpoint)
+      .then(({ config, inherited }) => {
         setSaved(config)
         setDraft(config)
+        setInherited(inherited ?? {})
+        setLoadError(null)
       })
-      .catch(() => {
-        setSaved({})
-        setDraft({})
-      })
-  }, [api, endpoint])
-  return { api, saved, setSaved, draft, setDraft }
+      .catch((e: unknown) => setLoadError(e instanceof Error ? e.message : 'Could not load these settings.'))
+  }, [api, endpoint, attempt])
+  const retry = useCallback(() => {
+    setLoadError(null)
+    setAttempt((n) => n + 1)
+  }, [])
+  return { api, saved, setSaved, draft, setDraft, inherited, loadError, retry }
 }
 
 export function ConfigForm({
@@ -65,7 +75,7 @@ export function ConfigForm({
   /** In a dialog the save bar sticks to the dialog's bottom instead of the window's. */
   inDialog?: boolean
 }) {
-  const { api, saved, setSaved, draft, setDraft } = useConfig(endpoint)
+  const { api, saved, setSaved, draft, setDraft, inherited, loadError, retry } = useConfig(endpoint)
   const [busy, setBusy] = useState(false)
   const [errors, setErrors] = useState<string[]>([])
   const [message, setMessage] = useState<string | null>(null)
@@ -97,6 +107,22 @@ export function ConfigForm({
     }
   }
 
+  if (loadError) {
+    return (
+      <Card>
+        <div role="alert" className="flex flex-wrap items-center justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-sm font-medium">These settings could not be loaded</p>
+            <p className="mt-0.5 text-sm text-muted">{loadError}</p>
+          </div>
+          <Button size="sm" variant="outline" onPress={retry}>
+            Try again
+          </Button>
+        </div>
+      </Card>
+    )
+  }
+
   if (!draft) {
     return (
       <div className="flex flex-col gap-4">
@@ -108,9 +134,9 @@ export function ConfigForm({
 
   return (
     <div className={cx('@container flex flex-col gap-5', !inDialog && 'pb-20')}>
-      {sections.includes('agents') && <AgentsSection config={draft} set={set} inheritsFrom={inheritsFrom} />}
-      {sections.includes('loops') && <LoopsSection config={draft} set={set} inheritsFrom={inheritsFrom} />}
-      {sections.includes('budgets') && <BudgetsSection config={draft} set={set} inheritsFrom={inheritsFrom} />}
+      {sections.includes('agents') && <AgentsSection config={draft} set={set} inheritsFrom={inheritsFrom} inherited={inherited} />}
+      {sections.includes('loops') && <LoopsSection config={draft} set={set} inheritsFrom={inheritsFrom} inherited={inherited} />}
+      {sections.includes('budgets') && <BudgetsSection config={draft} set={set} inheritsFrom={inheritsFrom} inherited={inherited} />}
 
       {message && !dirty && <Notice tone="success">{message}</Notice>}
 
@@ -141,9 +167,11 @@ type SectionProps = {
   config: RunConfig
   set: <K extends keyof RunConfig>(key: K, value: RunConfig[K] | undefined) => void
   inheritsFrom: string
+  /** The layers below this one, merged, as far as the server can tell. */
+  inherited: RunConfig
 }
 
-function AgentsSection({ config, set, inheritsFrom }: SectionProps) {
+function AgentsSection({ config, set, inheritsFrom, inherited }: SectionProps) {
   const setRole = (role: AgentRole, spec: RoleSpec | null | undefined) => {
     const agents = { ...(config.agents ?? {}) }
     if (spec === undefined) delete agents[role]
@@ -161,6 +189,8 @@ function AgentsSection({ config, set, inheritsFrom }: SectionProps) {
       <div className="grid gap-3 @2xl:grid-cols-3">
         {ROLES.map(({ role, title, description }) => {
           const spec = config.agents?.[role]
+          const below = inherited.agents?.[role]
+          const belowLabel = below === null ? 'off' : below ? [BACKENDS.find((b) => b.value === below.backend)?.label, below.model].filter(Boolean).join(' · ') : null
           const choice = spec === null ? 'off' : (spec?.backend ?? 'inherit')
           const options = [
             { value: 'inherit', label: 'Inherit' },
@@ -188,7 +218,7 @@ function AgentsSection({ config, set, inheritsFrom }: SectionProps) {
                 >
                   {options.map((o) => (
                     <option key={o.value} value={o.value}>
-                      {o.value === 'inherit' ? `Inherit (${inheritsFrom})` : o.label}
+                      {o.value === 'inherit' ? `Inherit (${belowLabel ? `${inheritsFrom}: ${belowLabel}` : inheritsFrom})` : o.label}
                     </option>
                   ))}
                 </select>
@@ -228,7 +258,7 @@ function money(value: number | undefined): string {
   return value === undefined ? '' : String(value)
 }
 
-function BudgetsSection({ config, set, inheritsFrom }: SectionProps) {
+function BudgetsSection({ config, set, inheritsFrom, inherited }: SectionProps) {
   const fields = [
     { key: 'budgetPerRunUsd' as const, title: 'Per run', description: 'A run stops between iterations once it has spent this much. 0 means no limit.' },
     { key: 'budgetPerDayUsd' as const, title: 'Per day, per runner', description: 'Machine-wide, so twenty small runs cannot add up to one runaway.' },
@@ -251,7 +281,7 @@ function BudgetsSection({ config, set, inheritsFrom }: SectionProps) {
                 min={0}
                 step="0.5"
                 className={cx(inputClass, 'pl-7 tabular-nums')}
-                placeholder={`Inherit (${inheritsFrom})`}
+                placeholder={inherited[f.key] !== undefined ? `Inherit: ${inherited[f.key]}` : `Inherit (${inheritsFrom})`}
                 value={money(config[f.key])}
                 onChange={(e) => set(f.key, e.target.value === '' ? undefined : Number(e.target.value))}
                 aria-label={f.title}
@@ -264,7 +294,7 @@ function BudgetsSection({ config, set, inheritsFrom }: SectionProps) {
             type="number"
             min={1}
             className={cx(inputClass, 'tabular-nums')}
-            placeholder={`Inherit (${inheritsFrom})`}
+            placeholder={inherited.verifyEvery !== undefined ? `Inherit: ${inherited.verifyEvery}` : `Inherit (${inheritsFrom})`}
             value={config.verifyEvery ?? ''}
             onChange={(e) => set('verifyEvery', e.target.value === '' ? undefined : Number(e.target.value))}
             aria-label="Review every N iterations"
@@ -275,13 +305,17 @@ function BudgetsSection({ config, set, inheritsFrom }: SectionProps) {
   )
 }
 
-function LoopsSection({ config, set, inheritsFrom }: SectionProps) {
-  const skipped = new Set(config.skipTiers ?? [])
+function LoopsSection({ config, set, inheritsFrom, inherited }: SectionProps) {
+  // `skipTiers` replaces rather than merges across layers, so the switches show
+  // the effective set, and any toggle writes the whole set at this layer — an
+  // empty list included, which is how a project turns back on what the org skips.
+  const own = config.skipTiers
+  const skipped = new Set(own ?? inherited.skipTiers ?? [])
   const toggle = (tier: string, enabled: boolean) => {
     const next = new Set(skipped)
     if (enabled) next.delete(tier)
     else next.add(tier)
-    set('skipTiers', next.size ? [...next] : undefined)
+    set('skipTiers', [...next])
   }
   const iosMode = config.iosRunnerMode ?? 'inherit'
 
@@ -291,7 +325,17 @@ function LoopsSection({ config, set, inheritsFrom }: SectionProps) {
         icon={<LoopIcon />}
         title="Feedback loops"
         description="Every iteration has to pass these, cheapest first, before anything is committed. A loop only runs when the project has what it needs."
+        actions={
+          own !== undefined && (
+            <Button size="sm" variant="ghost" onPress={() => set('skipTiers', undefined)}>
+              Follow {inheritsFrom}
+            </Button>
+          )
+        }
       />
+      {own === undefined && (inherited.skipTiers?.length ?? 0) > 0 && (
+        <p className="-mt-2 mb-3 text-xs text-muted">Switched off by the {inheritsFrom}: {inherited.skipTiers?.join(', ')}. Turning one on here overrides it.</p>
+      )}
       <div className="flex flex-col gap-2">
         {TIERS.map((tier) => {
           const Icon = tier.icon

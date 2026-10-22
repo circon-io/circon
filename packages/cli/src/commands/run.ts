@@ -85,6 +85,36 @@ export interface RunDeps {
   sleep: (ms: number) => Promise<void>
   /** Post-run housekeeping; it can prune the machine's pnpm store, so tests replace it. */
   collect: typeof collect
+  /** The control plane's side of a credential request. */
+  requestSecret: typeof requestSecret
+  jobSecrets: typeof jobSecrets
+}
+
+/**
+ * What a run reports about its feedback loops. `exercised` is every tier any
+ * iteration reached, for the dashboard; `passed` is what the last passing gate
+ * ran, for the PR's "Passed:" line; `failed` is where the run stopped, so a
+ * later pass clears it. Gates always run a prefix of one order, so insertion
+ * order is tier order.
+ */
+export class LoopTally {
+  private readonly seen = new Set<string>()
+  passed: string[] = []
+  failed: string | null = null
+
+  note(gate: Pick<GateResult, 'ok' | 'failedTier' | 'ranTiers'>): void {
+    for (const tier of gate.ranTiers) this.seen.add(tier)
+    if (gate.ok) {
+      this.passed = gate.ranTiers
+      this.failed = null
+    } else {
+      this.failed = gate.failedTier ?? 'unknown'
+    }
+  }
+
+  get exercised(): string[] {
+    return [...this.seen]
+  }
 }
 
 const realDeps = (): RunDeps => ({
@@ -93,6 +123,8 @@ const realDeps = (): RunDeps => ({
   preflight,
   sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   collect,
+  requestSecret,
+  jobSecrets,
 })
 
 interface Seat {
@@ -282,10 +314,12 @@ export async function runCommand(
     let infraRetries = 0
     let lastFailure = ''
     let verifyNotes = ''
-    let gateTiers: string[] = []
+    const loops = new LoopTally()
     // Credentials the agent asked for that nobody has supplied yet.
     const requested = new Set<string>()
     let waitingFor = ''
+    // Set when a requested credential turned out to exist already.
+    let refetchSecrets = false
     let ended: 'complete' | 'stopped' | 'budget' | 'limit' | 'usage-limit' = 'limit'
 
     /**
@@ -312,8 +346,9 @@ export async function runCommand(
     for (let i = 1; i <= maxLoops; i++) {
       // Dashboard edits land here, between iterations, never inside one.
       const changed = opts.refresh?.take() ?? { config: false, prd: false, secrets: false }
-      if (changed.secrets && opts.jobId) {
-        const fresh = await jobSecrets(opts.jobId)
+      if ((changed.secrets || refetchSecrets) && opts.jobId) {
+        refetchSecrets = false
+        const fresh = await deps.jobSecrets(opts.jobId)
         if (fresh) {
           applySecrets(fresh)
           const arrived = [...requested].filter((name) => fresh[name])
@@ -424,10 +459,10 @@ export async function runCommand(
         'contract and override your own defaults.',
         '',
         'If the task touches the UI, look at what you built as a product designer',
-        'would before you finish: every state (loading, empty, error) handled, copy',
-        'that is clear in every locale, a visible hierarchy, touch targets large',
-        'enough, and components from packages/ui rather than one-offs. Fix what you',
-        'find within this task; do not start other tasks.',
+        'would before you finish, against the UI rules in the conventions: every',
+        'state handled, copy that is clear in every locale, a visible hierarchy, and',
+        'the shared components rather than one-offs. Fix what you find within this',
+        'task; do not start other tasks.',
         '',
         SECRET_INSTRUCTION,
         'Document every variable you add in .env.example, with a comment saying where',
@@ -449,10 +484,17 @@ export async function runCommand(
       for (const ask of parseSecretRequests(notesSince(cwd, notesStart))) {
         if (requested.has(ask.name) || process.env[ask.name]) continue
         requested.add(ask.name)
-        const status = await requestSecret({ project, name: ask.name, reason: ask.reason, runId: report.runId })
-        if (status === 'available') ui.info(`${ask.name} exists in the dashboard; it arrives with the next refresh.`)
-        else if (status === 'pending') ui.warn(`The agent needs ${ask.name} (${ask.reason}) — answer it under Requests in the dashboard.`)
-        else ui.warn(`The agent needs ${ask.name} (${ask.reason}). Set it in the environment and run again.`)
+        const status = await deps.requestSecret({ project, name: ask.name, reason: ask.reason, runId: report.runId })
+        if (status === 'available' && opts.jobId) {
+          refetchSecrets = true
+          ui.info(`${ask.name} exists in the dashboard; it is loaded before the next iteration.`)
+        } else if (status === 'available') {
+          ui.warn(`${ask.name} exists in the dashboard, but this run was not dispatched from it. Set it in the environment and run again.`)
+        } else if (status === 'pending') {
+          ui.warn(`The agent needs ${ask.name} (${ask.reason}) — answer it under Requests in the dashboard.`)
+        } else {
+          ui.warn(`The agent needs ${ask.name} (${ask.reason}). Set it in the environment and run again.`)
+        }
       }
 
       if (built.limited) {
@@ -489,11 +531,11 @@ export async function runCommand(
       })
       appendFileSync(runLog, gate.output)
       channel.log(gate.output)
-      if (gate.ranTiers.length) {
-        gateTiers = gate.ranTiers
-        report.gateTiers = gate.ranTiers
-        ui.dim(`tiers: ${gate.ranTiers.join(' → ')} · ${budget.summary()}`)
-      }
+      loops.note(gate)
+      report.gateTiers = loops.exercised
+      if (loops.failed) report.failedTier = loops.failed
+      else delete report.failedTier
+      if (gate.ranTiers.length) ui.dim(`tiers: ${gate.ranTiers.join(' → ')} · ${budget.summary()}`)
 
       if (!gate.ok) {
         // A broken machine is not the agent's fault, and reverting its work
@@ -539,7 +581,6 @@ export async function runCommand(
         await repo.hardReset()
         lastFailure =
           `The previous attempt failed the ${gate.failedTier} gate:\n${gate.output.slice(-2000)}`
-        report.failedTier = gate.failedTier ?? 'unknown'
         stuck++
         verifyNotes = await reviewNotes(`gate failure at the ${gate.failedTier} tier`)
 
@@ -593,7 +634,7 @@ export async function runCommand(
       tasksCompleted: completed,
       tasksOpen: openTasks(cwd),
       notes: notesSince(cwd, notesStart),
-      gateTiers,
+      gateTiers: loops.passed,
       costUsd: budget.total,
       logPath: runLog,
       ...(settings?.dashboardUrl ? { runUrl: `${settings.dashboardUrl}/runs/${report.runId}` } : {}),
@@ -636,6 +677,7 @@ export async function runCommand(
     report.outcome = ended
     report.iterations = commits
     report.commits = commitSubjects.length
+    report.commitSubjects = commitSubjects
     report.costUsd = budget.total
     if (prUrl) report.prUrl = prUrl
 

@@ -1,5 +1,6 @@
 import { type Env, fail, ok, id, nowIso } from './env.ts'
 import { base64url } from './integrations/github.ts'
+import { notifyRunners } from './fleet.ts'
 
 /**
  * Org and project credentials, handed to runners per job.
@@ -128,7 +129,12 @@ export async function putSecret(request: Request, env: Env, org: string, userId:
   return ok({ name, scope })
 }
 
-/** Seal and upsert one value. */
+/**
+ * Seal and upsert one value, then answer any agent request it satisfies and
+ * tell the runners. However the value arrives — the Requests inbox, the
+ * Secrets list, or an org-wide machine secret — a waiting run picks it up at
+ * its next iteration boundary, and the request does not linger in the inbox.
+ */
 async function store(
   env: Env,
   where: { org: string; scope: SecretScope; projectId: string; name: string; userId: string },
@@ -145,6 +151,21 @@ async function store(
   )
     .bind(id('sec'), org, scope, projectId, name, sealed.ciphertext, sealed.iv, nowIso(), userId)
     .run()
+
+  // A machine secret reaches every project's jobs, so it answers them all.
+  await env.DB.prepare(
+    `UPDATE secret_requests SET status = 'fulfilled', resolved_at = ?1, resolved_by = ?2
+     WHERE org = ?3 AND name = ?4 AND status = 'pending' AND (?5 = '' OR project_id = ?5)`,
+  )
+    .bind(nowIso(), userId, org, name, scope === 'project' ? projectId : '')
+    .run()
+
+  if (scope === 'machine') {
+    await notifyRunners(env, org, { type: 'secrets-changed' })
+    return
+  }
+  const project = await env.DB.prepare('SELECT slug FROM projects WHERE id = ?1').bind(projectId).first<{ slug: string }>()
+  if (project) await notifyRunners(env, org, { type: 'secrets-changed', project: project.slug })
 }
 
 /** For answering an agent's request: a project secret, validated like any other. Null on success. */
