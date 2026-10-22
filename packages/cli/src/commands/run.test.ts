@@ -36,6 +36,10 @@ beforeEach(() => {
   mkdirSync(project)
   process.env['CIRCON_HOME'] = home
   execFileSync('git', ['init', '-q', '-b', 'main', project])
+  // The loop's own commits need an identity too. A laptop has a global one;
+  // a CI runner has none, and its commits would fail silently.
+  execFileSync('git', ['-C', project, 'config', 'user.name', 't'])
+  execFileSync('git', ['-C', project, 'config', 'user.email', 't@t'])
   previousCwd = process.cwd()
   process.chdir(project)
 })
