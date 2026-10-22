@@ -152,19 +152,24 @@ runner from becoming a compromised estate.
 
 ## 5. Project template: portable by construction
 
-- [ ] `services/api` on Hono: auth middleware (Clerk JWT), `requireRole`, `/me`,
+- [x] `services/api` on Hono: auth middleware (Clerk JWT), `requireRole`, `/me`,
       an example admin route, a Clerk webhook. One adapter per hosting target
-- [ ] `packages/domain` for business logic, and Drizzle on SQLite (D1 by
+- [x] `packages/domain` for business logic, and Drizzle on SQLite (D1 by
       default, libSQL elsewhere)
-- [ ] `apps/mobile`: Expo Router, HeroUI Native, a role-gated admin area,
+- [x] `apps/mobile`: Expo Router, HeroUI Native, a role-gated admin area,
       exported to web
 - [ ] `apps/web` (optional, marketing and SEO only): Next.js, OpenNext
-      Cloudflare, HeroUI
-- [ ] `packages/ui`: real `index.web.tsx` and `index.native.tsx`
-- [ ] `codemagic.yaml` (iOS dev client plus store releases) and Changesets
+      Cloudflare, HeroUI. Not in the default template: most products do not
+      need one, and the app's web export already covers the admin area
+- [x] `packages/ui`: HeroUI Native wrappers that require `testID` and
+      `accessibilityLabel` (one implementation, since the app renders HeroUI
+      Native on the web too)
+- [x] `codemagic.yaml` (iOS dev client plus store releases) and Changesets
+- [ ] First real Codemagic run of `dev-client` and `release`. The workflow
+      parses, but nobody has signed and shipped a build through it yet
 - [x] `.github/workflows/ci.yml` and `deploy.yml` in the template
 - [x] Zustand, Clerk, Sentry and i18n (en + de) packages
-- [ ] Conventions v2: the rules above, written down for the agent
+- [x] Conventions v2: the rules above, written down for the agent
 
 **Why the admin area lives in the Expo app:** a second UI codebase is a second
 thing for the agent to keep in sync. Expo exports to web, so admins still get a
