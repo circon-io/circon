@@ -1,7 +1,7 @@
 'use client'
 
-import { useAuth } from '@clerk/nextjs'
 import { useCallback } from 'react'
+import { PREVIEW, useSessionToken } from './auth'
 
 /**
  * Typed client for the control-plane Worker.
@@ -68,8 +68,33 @@ export interface Run {
   pr_url: string | null
   pr_state: string | null
   failed_tier: string | null
+  /** The feedback loops this run exercised, cheapest first. */
+  gate_tiers: string[]
   started_at: string
   finished_at: string | null
+}
+
+export interface Overview {
+  runsLast7d: number
+  running: number
+  successRate7d: number | null
+  spentLast24h: number
+  spentLast30d: number
+  pendingRequests: number
+  plansAwaitingApproval: number
+}
+
+/** A credential the agent asked for mid-run. */
+export interface SecretRequest {
+  id: string
+  name: string
+  reason: string
+  status: 'pending' | 'fulfilled' | 'dismissed'
+  run_id: string | null
+  created_at: string
+  resolved_at: string | null
+  project_id: string
+  project_slug: string
 }
 
 export interface RunDetail extends Run {
@@ -90,19 +115,26 @@ export class ApiError extends Error {
 }
 
 export function useApi() {
-  const { getToken } = useAuth()
+  const getToken = useSessionToken()
 
   return useCallback(
     async <T,>(path: string, init: RequestInit = {}): Promise<T> => {
-      const token = await getToken()
-      const res = await fetch(`${BASE}${path}`, {
-        ...init,
-        headers: {
-          ...(init.headers ?? {}),
-          authorization: `Bearer ${token ?? ''}`,
-          ...(init.body ? { 'content-type': 'application/json' } : {}),
-        },
-      })
+      let res: { status: number; json: () => Promise<unknown> }
+      if (PREVIEW) {
+        const { previewFetch } = await import('./preview')
+        const answer = await previewFetch(path, init)
+        res = { status: answer.status, json: async () => answer.body }
+      } else {
+        const token = await getToken()
+        res = await fetch(`${BASE}${path}`, {
+          ...init,
+          headers: {
+            ...(init.headers ?? {}),
+            authorization: `Bearer ${token ?? ''}`,
+            ...(init.body ? { 'content-type': 'application/json' } : {}),
+          },
+        })
+      }
 
       const body = (await res.json().catch(() => ({}))) as {
         ok?: boolean
@@ -158,9 +190,13 @@ export interface PlanCheck {
  * EventSource, because EventSource cannot send the Authorization header.
  */
 export function useEventStream() {
-  const { getToken } = useAuth()
+  const getToken = useSessionToken()
   return useCallback(
     async (path: string, body: unknown, onEvent: (event: string, data: Record<string, unknown>) => void) => {
+      if (PREVIEW) {
+        const { previewStream } = await import('./preview')
+        return previewStream(onEvent)
+      }
       const token = await getToken()
       const res = await fetch(`${BASE}${path}`, {
         method: 'POST',
@@ -207,4 +243,21 @@ export function ago(iso: string | null | undefined): string {
   if (secs < 3600) return `${Math.round(secs / 60)}m ago`
   if (secs < 86_400) return `${Math.round(secs / 3600)}h ago`
   return `${Math.round(secs / 86_400)}d ago`
+}
+
+export function percent(value: number | null | undefined): string {
+  return value === null || value === undefined ? '—' : `${Math.round(value * 100)}%`
+}
+
+/** `owner__repo` as people write it. */
+export function repoName(slug: string): string {
+  return slug.replace('__', '/')
+}
+
+export function duration(fromIso: string, toIso?: string | null): string {
+  const secs = Math.max(0, Math.round(((toIso ? Date.parse(toIso) : Date.now()) - Date.parse(fromIso)) / 1000))
+  if (secs < 60) return `${secs}s`
+  const mins = Math.round(secs / 60)
+  if (mins < 60) return `${mins}m`
+  return `${Math.floor(mins / 60)}h ${mins % 60}m`
 }

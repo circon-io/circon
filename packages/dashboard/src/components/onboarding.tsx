@@ -1,85 +1,88 @@
 'use client'
 
-import { useEffect, useState } from 'react'
 import NextLink from 'next/link'
-import { CardContent, CardHeader, CardRoot, CardTitle } from '@heroui/react'
-import { useApi, type Project, type Run, type Runner } from '@/lib/api'
+import { repoName, type Project, type Run, type Runner } from '@/lib/api'
+import { Card, cx } from './ui/primitives'
+import { CheckIcon, ChevronRightIcon } from './ui/icons'
 
 interface Step {
   label: string
+  detail: string
   done: boolean
-  hint: React.ReactNode
+  href: string
+  action: string
 }
 
 /**
  * The path from nothing to a first build, in the order it has to happen.
- * Hidden once everything is done: it is a guide, not a permanent fixture.
+ * It disappears once everything is done: a guide, not furniture.
  */
-export function Onboarding({ runners, runs }: { runners: Runner[]; runs: Run[] }) {
-  const api = useApi()
-  const [state, setState] = useState<{ integrations: number; projects: Project[] } | null>(null)
-
-  useEffect(() => {
-    Promise.all([api<{ integrations: Array<{ revoked_at: string | null }> }>('/api/integrations'), api<{ projects: Project[] }>('/api/projects')])
-      .then(([i, p]) => setState({ integrations: i.integrations.filter((x) => !x.revoked_at).length, projects: p.projects }))
-      .catch(() => setState(null))
-  }, [api, runners.length, runs.length])
-
-  if (!state) return null
-  const firstProject = state.projects[0]
-  const planned = state.projects.find((p) => p.approved_plan)
+export function Onboarding({
+  integrations,
+  projects,
+  runners,
+  runs,
+}: {
+  integrations: number
+  projects: Project[]
+  runners: Runner[]
+  runs: Run[]
+}) {
+  const first = projects[0]
+  const planned = projects.find((p) => p.approved_plan)
   const steps: Step[] = [
-    { label: 'Connect GitHub', done: state.integrations > 0, hint: 'Install the circon GitHub App on your account or organization, under Projects below.' },
-    { label: 'Add a repository', done: state.projects.length > 0, hint: 'Pick the repository the app will live in. It can be empty.' },
+    { label: 'Connect GitHub', detail: 'Install the circon app on your account or organization.', done: integrations > 0, href: '/projects', action: 'Connect' },
+    { label: 'Add a repository', detail: 'The repository the app will live in. It can be empty.', done: projects.length > 0, href: '/projects', action: 'Add repository' },
     {
-      label: 'Describe it and approve the plan',
+      label: 'Plan it',
+      detail: 'Describe the idea; the AI writes the plan, you refine and approve it.',
       done: Boolean(planned),
-      hint: firstProject ? (
-        <NextLink href={`/projects/${firstProject.id}`} className="underline">
-          Open {firstProject.slug.replace('__', '/')} and describe what to build
-        </NextLink>
-      ) : (
-        'Describe the idea; the AI writes the plan, you refine and approve it.'
-      ),
+      href: first ? `/projects/${first.id}?tab=plan` : '/projects',
+      action: first ? `Plan ${repoName(first.slug)}` : 'Plan',
     },
-    { label: 'Connect a runner', done: runners.length > 0, hint: 'Create an enrollment token below and run the command it shows on your machine.' },
-    {
-      label: 'Start the first build',
-      done: runs.length > 0,
-      hint: planned ? (
-        <NextLink href={`/projects/${planned.id}`} className="underline">
-          Start a build of {planned.slug.replace('__', '/')}
-        </NextLink>
-      ) : (
-        'Once a plan is approved and a runner is connected.'
-      ),
-    },
+    { label: 'Connect a runner', detail: 'Enroll the machine that builds, with one command.', done: runners.length > 0, href: '/runners', action: 'Add runner' },
+    { label: 'Start the first build', detail: 'The runner scaffolds the project and works through the plan.', done: runs.length > 0, href: planned ? `/projects/${planned.id}` : '/projects', action: 'Start build' },
   ]
   if (steps.every((s) => s.done)) return null
   const next = steps.findIndex((s) => !s.done)
+  const current = steps[next]
+  const done = steps.filter((s) => s.done).length
 
   return (
-    <CardRoot data-testid="onboarding">
-      <CardHeader>
-        <CardTitle>From idea to a running build</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <ol className="flex flex-col gap-2 text-sm">
-          {steps.map((step, i) => (
-            <li key={step.label} className="flex gap-3">
-              <span aria-hidden className={step.done ? 'text-success' : i === next ? 'text-foreground' : 'text-default-400'}>
-                {step.done ? '✓' : `${i + 1}.`}
+    <Card className="overflow-hidden p-0" padded={false}>
+      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-separator px-5 py-4">
+        <div>
+          <h2 className="text-[15px] font-semibold">From idea to a running build</h2>
+          <p className="mt-0.5 text-sm text-muted">{done} of {steps.length} done</p>
+        </div>
+        {current && (
+          <NextLink
+            href={current.href}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-accent-foreground transition-opacity hover:opacity-90"
+          >
+            {current.action}
+            <ChevronRightIcon className="size-3.5" />
+          </NextLink>
+        )}
+      </div>
+      <ol className="grid sm:grid-cols-5">
+        {steps.map((step, i) => (
+          <li key={step.label} className={cx('border-separator px-5 py-4 sm:border-l sm:first:border-l-0', i === next && 'bg-accent-soft/40')}>
+            <div className="flex items-center gap-2">
+              <span
+                className={cx(
+                  'grid size-5 shrink-0 place-items-center rounded-full text-[11px] font-semibold',
+                  step.done ? 'bg-success text-success-foreground' : i === next ? 'bg-accent text-accent-foreground' : 'bg-surface-tertiary text-muted',
+                )}
+              >
+                {step.done ? <CheckIcon className="size-3" /> : i + 1}
               </span>
-              <div>
-                <div className={step.done ? 'text-default-500 line-through' : i === next ? 'font-medium' : 'text-default-500'}>
-                  {step.label}
-                </div>
-                {i === next && <div className="text-default-500">{step.hint}</div>}
-              </div>
-            </li>
-          ))}
-        </ol>
-      </CardContent>
-    </CardRoot>
+              <span className={cx('text-sm font-medium', step.done && 'text-muted line-through')}>{step.label}</span>
+            </div>
+            <p className="mt-1.5 text-xs leading-relaxed text-muted">{step.detail}</p>
+          </li>
+        ))}
+      </ol>
+    </Card>
   )
 }

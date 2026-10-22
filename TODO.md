@@ -143,6 +143,14 @@ There are two gates because they answer different questions:
 - [x] Held in memory, injected into the agent and gate environments, dropped at
       job end
 - [x] Rotation: change it centrally, and runners pick it up at the next job
+- [x] The agent asks for credentials it lacks: a `NEEDS-SECRET: NAME — reason`
+      line in its notes becomes a request in the dashboard's Requests inbox.
+      Answering it stores a project secret and pushes `secrets-changed`; the
+      run picks the value up at the next iteration boundary, without a restart
+
+**Why an inbox and not a failure:** a missing Stripe key is not a bug the agent
+can fix. Before this it either stubbed the integration or burned iterations on
+it. Now it builds what it can and the human answers once.
 
 Distributing secrets puts every credential on every runner inside the control
 plane's blast radius. Scoping them per project is what stops a compromised

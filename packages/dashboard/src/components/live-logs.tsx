@@ -1,8 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useAuth } from '@clerk/nextjs'
-import { Spinner } from '@heroui/react'
+import { PREVIEW, useSessionToken } from '@/lib/auth'
 import { controlPlaneUrl } from '@/lib/api'
 
 /**
@@ -13,7 +12,7 @@ import { controlPlaneUrl } from '@/lib/api'
  * first so opening the view mid-run shows recent context, not a blank pane.
  */
 export function useLiveLogs(runnerId: string, onState?: () => void) {
-  const { getToken } = useAuth()
+  const getToken = useSessionToken()
   const [lines, setLines] = useState<string[]>([])
   const [active, setActive] = useState(false)
   const socketRef = useRef<WebSocket | null>(null)
@@ -30,6 +29,11 @@ export function useLiveLogs(runnerId: string, onState?: () => void) {
 
   const start = useCallback(async () => {
     setActive(true)
+    if (PREVIEW) {
+      const { previewLogLines } = await import('@/lib/preview')
+      setLines(previewLogLines())
+      return
+    }
     setLines(['Connecting…'])
     const token = await getToken()
 
@@ -69,24 +73,4 @@ export function useLiveLogs(runnerId: string, onState?: () => void) {
   useEffect(() => () => socketRef.current?.close(), [])
 
   return { lines, active, start, stop }
-}
-
-export function LogPane({ lines, testId }: { lines: string[]; testId?: string }) {
-  const ref = useRef<HTMLPreElement>(null)
-  // Always pin to the newest line — a log you have to drag is useless while
-  // something is actively going wrong.
-  useEffect(() => {
-    if (ref.current) ref.current.scrollTop = ref.current.scrollHeight
-  }, [lines])
-
-  return (
-    <pre
-      ref={ref}
-      className="max-h-96 overflow-auto rounded-md bg-default-100 p-3 font-mono text-xs whitespace-pre-wrap"
-      data-testid={testId}
-      aria-live="polite"
-    >
-      {lines.length ? lines.join('\n') : <Spinner size="sm" aria-label="Loading logs" />}
-    </pre>
-  )
 }

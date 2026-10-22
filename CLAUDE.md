@@ -98,6 +98,11 @@ if a `requires` names something unknown or declared later.
   `config-changed`/`prd-changed` from the dashboard and `run.ts` applies them
   before the next iteration starts. The PRD sync is a one-file checkout, which
   is conflict-free only because the agent never writes `PRD.md`.
+- **Credential requests.** The agent writes `NEEDS-SECRET: NAME — reason` in
+  its notes (`agent/requests.ts` parses it; the instruction is in every build
+  prompt). `run.ts` forwards each new name once; answering it in the dashboard
+  stores a project secret and sends `secrets-changed`, and `run.ts` refetches
+  the job's secrets at the next iteration boundary.
 - **Config is layered**: CLI defaults < local `config.json` < org < runner <
   project. The control plane merges the last three at claim time and ships the
   snapshot in the job (`control-plane/src/config.ts` and `core/config.ts` must
@@ -126,6 +131,19 @@ Claude Code reviews.
   the run as `usage-limit`.
 - `run.ts` takes `RunDeps` (backends, gate, preflight, sleep, collect);
   `run.test.ts` drives the real loop against a temp git repo with fakes.
+
+### The dashboard
+
+`packages/dashboard`: Next 16 + HeroUI **v3**. Use v3's semantic tokens
+(`bg-surface`, `text-muted`, `border-border`, `bg-accent-soft`); v2 classes such
+as `text-default-500` compile to nothing, which is most of why the old dashboard
+looked broken. Shared building blocks are in `components/ui/primitives.tsx`, and
+the feedback-loop tiers are described once in `components/loops/tiers.ts`.
+
+`NEXT_PUBLIC_PREVIEW=1 npx next dev` runs it without Clerk or a control plane,
+against the fixtures in `lib/preview.ts`. Use it for design work and
+screenshots. It is compiled out of production builds (the flag is checked
+together with `NODE_ENV`).
 
 ### The GitHub connection
 
