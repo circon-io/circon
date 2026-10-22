@@ -210,6 +210,23 @@ export async function previewFetch(path: string, init: RequestInit = {}): Promis
     if (method === 'POST') db.settings = (body['config'] as Record<string, unknown>) ?? {}
     return okBody({ config: db.settings, inherited: {} })
   }
+  if (/^\/api\/projects\/[^/]+\/env-checklist$/.test(p)) {
+    const stored = new Set([...(db.secrets['machine'] ?? []), ...(db.secrets[seg[3] ?? ''] ?? [])].map((x) => String(x['name'])))
+    const raw: Array<[string, string, string | null, boolean, 'env-example' | 'plan']> = seg[3] === 'prj_portal' ? [] : [
+      ['EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY', 'The app: Clerk dashboard → API Keys → Publishable key', 'Clerk (auth)', false, 'env-example'],
+      ['CLERK_JWKS_URL', 'The API verifies session tokens against these (Clerk → API Keys → JWKS URL)', 'Clerk (auth)', false, 'env-example'],
+      ['CLERK_WEBHOOK_SECRET', 'Clerk → Webhooks → your endpoint → Signing secret (whsec_…)', 'Clerk (auth)', false, 'env-example'],
+      ['EXPO_PUBLIC_API_URL', '', 'The API', true, 'env-example'],
+      ['CLOUDFLARE_ACCOUNT_ID', '', 'Cloudflare (deploys)', false, 'env-example'],
+      ['CLOUDFLARE_API_TOKEN', '', 'Cloudflare (deploys)', false, 'env-example'],
+      ['STRIPE_SECRET_KEY', 'Checkout and subscriptions; Stripe → Developers → API keys', 'From the plan', false, 'plan'],
+    ]
+    const items = raw.map(([name, help, group, hasDefault, source]) => ({
+      name, help, group, source,
+      status: stored.has(name) ? 'set' : hasDefault ? 'default' : 'missing',
+    }))
+    return okBody({ items, foundEnvExample: seg[3] !== 'prj_portal', readError: null, missing: items.filter((i) => i.status === 'missing').length })
+  }
   if (/^\/api\/runners\/[^/]+\/config$/.test(p)) {
     const runner = db.runners.find((r) => r.id === seg[3])
     if (runner && method === 'POST') runner.config = (body['config'] as typeof runner.config) ?? {}
@@ -265,6 +282,11 @@ export async function previewFetch(path: string, init: RequestInit = {}): Promis
     if (method === 'POST') {
       const key = body['scope'] === 'machine' ? 'machine' : String(body['projectId'])
       ;(db.secrets[key] ??= []).push({ id: `sec_${Math.random()}`, name: body['name'], updated_at: new Date().toISOString(), updated_by: 'you' })
+      // As the control plane does: storing a name answers the requests for it.
+      for (const r of db.requests) {
+        if (r['name'] === body['name'] && r['status'] === 'pending' && (key === 'machine' || r['project_id'] === key)) r['status'] = 'fulfilled'
+      }
+      db.overview.pendingRequests = db.requests.filter((x) => x['status'] === 'pending').length
       return okBody({ name: body['name'] })
     }
     const key = url.searchParams.get('scope') === 'project' ? (url.searchParams.get('projectId') ?? '') : 'machine'

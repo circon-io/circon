@@ -79,6 +79,13 @@ What makes a PRD good here:
   data model and API first, then screens, then polish. Include the tests and
   the accessibility labels as part of the task that builds a thing, not as
   separate tasks at the end. Usually 15 to 60 tasks.
+- It names what the owner must supply. Every third-party service the product
+  needs a credential for goes under "External services", one line per
+  variable: "- NAME — what it is for; where to get it". List only what the
+  product adds beyond the template's own services (Clerk, Cloudflare, Sentry).
+  The dashboard turns this into a checklist, so the owner can gather keys while
+  the agent builds; the agent itself always builds against a dev key, a local
+  emulator or a stub.
 - Respect the stack and the project template in the conventions below. Do not
   plan tasks for what the template already provides (monorepo layout, CI/CD,
   the auth middleware, i18n setup); plan the product.
@@ -87,8 +94,10 @@ What makes a PRD good here:
 
 Output format — follow it exactly:
 - Only the PRD markdown. No preamble, no closing remarks, no code fence around it.
-- Use the section headings of the template below, in its order, then end with
-  "## Proposed additions" (omit it if you have nothing worth proposing).
+- Use the section headings of the template below, in its order. Leave out
+  "## External services" when the product needs nothing beyond the template's
+  services, and "## Proposed additions" when you have nothing worth proposing.
+- Replace every HTML comment in the template with the section's content.
 - Every task line is exactly "- [ ] <task>". No nested lists under tasks. Only
   the Task Backlog has task lines.
 - Never leave a CIRCON-UNFILLED comment: write the section instead.

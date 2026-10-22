@@ -227,6 +227,23 @@ function toBase64(text: string): string {
   return btoa(binary)
 }
 
+/** One file's text on a branch, or null when it does not exist there. */
+export async function readFile(
+  env: Env,
+  installationId: string,
+  fullName: string,
+  path: string,
+  branch: string,
+): Promise<string | null> {
+  const token = await repoToken(env, installationId, fullName)
+  const res = await fetch(`${API}/repos/${fullName}/contents/${path}?ref=${encodeURIComponent(branch)}`, {
+    headers: { ...headers(token), accept: 'application/vnd.github.raw+json' },
+  })
+  if (res.status === 404) return null
+  if (!res.ok) throw new Error(`could not read ${path} (HTTP ${res.status})`)
+  return res.text()
+}
+
 export type CommitOutcome =
   | { kind: 'committed'; sha: string }
   | { kind: 'pull-request'; url: string }

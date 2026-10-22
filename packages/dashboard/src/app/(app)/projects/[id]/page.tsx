@@ -4,13 +4,14 @@ import { useCallback, useState } from 'react'
 import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import NextLink from 'next/link'
 import { Button } from '@heroui/react'
-import { ago, repoName, useApi, type Project, type Run, type Runner, type SecretRequest } from '@/lib/api'
+import { ago, repoName, useApi, type EnvChecklist as Keys, type Project, type Run, type Runner, type SecretRequest } from '@/lib/api'
 import { useData } from '@/lib/use-data'
 import { Badge, Card, CardHeader, EmptyState, Field, Mono, Notice, PageHeader, Skeleton, TabBar, inputClass } from '@/components/ui/primitives'
 import { RunTable } from '@/components/runs/run-table'
 import { PlanPanel } from '@/components/plan/plan-panel'
 import { ReleasePanel } from '@/components/release/release-panel'
 import { SecretsList } from '@/components/secrets/secrets-list'
+import { EnvChecklist } from '@/components/secrets/env-checklist'
 import { ConfigForm } from '@/components/config/config-form'
 import { LoopHealth } from '@/components/loops/loop-health'
 import { ExternalIcon, GithubIcon, KeyIcon, LoopIcon, PlayIcon, RocketIcon, SparklesIcon } from '@/components/ui/icons'
@@ -47,6 +48,12 @@ export default function ProjectPage() {
     [api, id],
   )
   const { data, error, reload } = useData<Data>(load, { intervalMs: 10_000 })
+  // Saving a secret in one list refreshes the other, and the request badge.
+  const [secretsVersion, setSecretsVersion] = useState(0)
+  const secretsChanged = () => {
+    setSecretsVersion((v) => v + 1)
+    reload()
+  }
 
   if (error && !data) return <Notice tone="danger">{error}</Notice>
   if (!data) return <Skeleton className="h-96" />
@@ -112,9 +119,10 @@ export default function ProjectPage() {
               The agent is waiting for {requests.map((r) => r.name).join(', ')}. <NextLink href="/requests" className="font-medium underline">Answer in Requests</NextLink>
             </Notice>
           )}
+          <EnvChecklist projectId={project.id} version={secretsVersion} onChanged={secretsChanged} />
           <Card>
             <CardHeader icon={<KeyIcon />} title="Project secrets" description="Given to a runner only for this project's jobs, and only while the job runs: deploy tokens, Clerk and Sentry keys, Codemagic credentials." />
-            <SecretsList scope="project" projectId={project.id} />
+            <SecretsList scope="project" projectId={project.id} version={secretsVersion} onChanged={secretsChanged} />
           </Card>
         </div>
       )}
@@ -132,6 +140,9 @@ function OverviewTab({
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<{ tone: 'success' | 'danger'; text: string } | null>(null)
   const running = runs.find((r) => r.outcome === 'running')
+  // Loaded once: it reads .env.example through GitHub, which is not worth polling.
+  const loadKeys = useCallback(() => api<Keys>(`/api/projects/${project.id}/env-checklist`), [api, project.id])
+  const keys = useData(loadKeys).data
 
   const build = async () => {
     setBusy(true)
@@ -224,6 +235,18 @@ function OverviewTab({
             <li className="flex items-center justify-between">
               <span className="text-muted">Waiting on you</span>
               {requests.length ? <button type="button" onClick={() => goTo('secrets')}><Badge tone="warning">{requests.length} request{requests.length === 1 ? '' : 's'}</Badge></button> : <span>Nothing</span>}
+            </li>
+            <li className="flex items-center justify-between">
+              <span className="text-muted">Keys</span>
+              {!keys ? (
+                <span className="text-muted">…</span>
+              ) : keys.items.length === 0 ? (
+                <span>None needed yet</span>
+              ) : keys.missing ? (
+                <button type="button" onClick={() => goTo('secrets')}><Badge tone="warning">{keys.missing} missing</Badge></button>
+              ) : (
+                <Badge tone="success">All {keys.items.length} ready</Badge>
+              )}
             </li>
             <li className="flex items-center justify-between">
               <span className="text-muted">Releases</span>

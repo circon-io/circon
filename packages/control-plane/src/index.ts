@@ -16,6 +16,7 @@ import {
 } from './fleet.ts'
 import { createRequest, listRequests, fulfillRequest, dismissRequest } from './requests.ts'
 import { digest } from './digest.ts'
+import { envChecklist } from './env-checklist.ts'
 import { listPlans, getPlan, editPlan, streamPlan, approvePlan } from './planning/routes.ts'
 import { releaseReport, approveRelease } from './releases.ts'
 import { listSecrets, putSecret, deleteSecret, secretsForJob } from './secrets.ts'
@@ -243,6 +244,9 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         }
         if (/^\/api\/secrets\/[^/]+$/.test(path) && request.method === 'DELETE') {
           return await deleteSecret(env, principal.org, segment(3))
+        }
+        if (/^\/api\/projects\/[^/]+\/env-checklist$/.test(path) && request.method === 'GET') {
+          return await envChecklist(env, principal.org, segment(3))
         }
         if (/^\/api\/projects\/[^/]+\/config$/.test(path)) {
           if (request.method === 'GET') return await getProjectConfig(env, principal.org, segment(3))

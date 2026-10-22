@@ -289,3 +289,17 @@ export function duration(fromIso: string, toIso?: string | null): string {
   if (mins < 60) return `${mins}m`
   return `${Math.floor(mins / 60)}h ${mins % 60}m`
 }
+
+/** What a project needs from its owner: `.env.example` plus the plan's External services. */
+export interface EnvChecklist {
+  items: Array<{
+    name: string
+    help: string
+    group: string | null
+    status: 'set' | 'default' | 'missing'
+    source: 'env-example' | 'plan'
+  }>
+  foundEnvExample: boolean
+  readError: string | null
+  missing: number
+}

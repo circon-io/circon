@@ -17,10 +17,24 @@ interface SecretRow {
  * Write-only credentials: a value can be set or replaced, never read back. The
  * only reader is a runner, for a job it was dispatched.
  */
-export function SecretsList({ scope, projectId }: { scope: 'machine' | 'project'; projectId?: string }) {
+export function SecretsList({
+  scope,
+  projectId,
+  version = 0,
+  onChanged,
+}: {
+  scope: 'machine' | 'project'
+  projectId?: string
+  /** Bumped by the page when a secret was saved elsewhere on it. */
+  version?: number
+  onChanged?: () => void
+}) {
   const api = useApi()
   const query = scope === 'project' ? `scope=project&projectId=${encodeURIComponent(projectId ?? '')}` : 'scope=machine'
-  const load = useCallback(() => api<{ secrets: SecretRow[] }>(`/api/secrets?${query}`).then((d) => d.secrets), [api, query])
+  const load = useCallback(
+    () => api<{ secrets: SecretRow[] }>(`/api/secrets?${query}&v=${version}`).then((d) => d.secrets),
+    [api, query, version],
+  )
   const { data, reload } = useData(load)
   const [adding, setAdding] = useState(false)
   const [name, setName] = useState('')
@@ -35,6 +49,7 @@ export function SecretsList({ scope, projectId }: { scope: 'machine' | 'project'
       setValue('')
       setAdding(false)
       reload()
+      onChanged?.()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not save')
     }
@@ -43,6 +58,7 @@ export function SecretsList({ scope, projectId }: { scope: 'machine' | 'project'
     if (!confirm(`Delete ${row.name}? Runs already going keep the value they were given.`)) return
     await api(`/api/secrets/${row.id}`, { method: 'DELETE' })
     reload()
+    onChanged?.()
   }
 
   if (!data) return <Skeleton className="h-24" />
