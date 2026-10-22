@@ -24,6 +24,7 @@ the dashboard to provide one.
 | `GH_APP_PRIVATE_KEY` | Created in step 6 below. Paste the whole PEM including the BEGIN/END lines. **Must be PKCS#8** — see step 6. |
 | `GH_WEBHOOK_SECRET` | Generate yourself: `openssl rand -hex 32`. Also entered in the App's settings. |
 | `GH_CLIENT_SECRET` | The App's page → **Generate a new client secret** (step 6). Proves who completed an install. |
+| `ANTHROPIC_API_KEY` | console.anthropic.com → API Keys. Pays for plan generation in the dashboard, which is metered per org against `planGenerations` in `billing/plans.ts`. Runners never see it. |
 
 `GITHUB_TOKEN` is injected automatically. **Do not create one.**
 
@@ -60,6 +61,8 @@ keys and account ids belong here, not in secrets, so they can be diffed.
 | `GH_APP_ID` | The numeric App ID from step 6 |
 | `GH_APP_SLUG` | The App's URL slug from step 6, e.g. `circon`. Builds the install link. |
 | `GH_CLIENT_ID` | The App's **Client ID** from step 6 (`Iv1.…`). Public. |
+| `PLAN_MODEL` | Optional. The model that writes project plans; empty means `claude-fable-5-1`. |
+| `CONVENTIONS_REF` | Optional. The conventions tag plans are written against, e.g. `v1.0.0`; empty means `main`. Keep it at the tag runners resolve to, so a plan never asks for what a runner will not build. |
 | `CONTROL_PLANE_DOMAIN` | Hostname for the API Worker, e.g. `api.circon.io`. Zone must be on Cloudflare. |
 | `DASHBOARD_DOMAIN` | Hostname for the dashboard, e.g. `app.circon.io` |
 | `CONTROL_PLANE_URL` | `https://<CONTROL_PLANE_DOMAIN>` |
@@ -292,9 +295,10 @@ rather than reaching for the template.
 
 ```
 [ ] GitHub environment `production` with required reviewers
-[ ] 8 secrets  (CLOUDFLARE_API_TOKEN, CLERK_SECRET_KEY, RUNNER_SECRET_PEPPER,
+[ ] 9 secrets  (CLOUDFLARE_API_TOKEN, CLERK_SECRET_KEY, RUNNER_SECRET_PEPPER,
                 STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET,
-                GH_APP_PRIVATE_KEY, GH_WEBHOOK_SECRET, GH_CLIENT_SECRET)
+                GH_APP_PRIVATE_KEY, GH_WEBHOOK_SECRET, GH_CLIENT_SECRET,
+                ANTHROPIC_API_KEY)
 [ ] 12 variables (CLOUDFLARE_ACCOUNT_ID, CLERK_JWKS_URL, CLERK_ISSUER,
                   NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY, STRIPE_PRICE_PRO,
                   GH_APP_ID, GH_APP_SLUG, GH_CLIENT_ID,

@@ -14,6 +14,7 @@ import {
   getSettings, putSettings, putRunnerConfig, getProjectConfig, putProjectConfig,
   claimJob, queueJob, recordRun, listRuns, getRun,
 } from './fleet.ts'
+import { listPlans, getPlan, editPlan, streamPlan, approvePlan } from './planning/routes.ts'
 import { createCheckout, createPortal, handleWebhook } from './billing/stripe.ts'
 import { publicPlans, isPlanId } from './billing/plans.ts'
 
@@ -179,6 +180,24 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         if (path === '/api/projects' && request.method === 'POST') {
           return await createProject(request, env, principal.org)
         }
+        if (/^\/api\/projects\/[^/]+\/plans/.test(path)) {
+          const projectId = segment(3)
+          const rest = path.split('/').slice(5)
+          if (rest.length === 0 && request.method === 'GET') return await listPlans(env, principal.org, projectId)
+          if (rest.length === 0 && request.method === 'POST') {
+            return await editPlan(request, env, principal.org, principal.id, projectId)
+          }
+          if (rest[0] === 'stream' && request.method === 'POST') {
+            return await streamPlan(request, env, ctx, principal.org, principal.id, projectId)
+          }
+          const version = Number.parseInt(rest[0] ?? '', 10)
+          if (Number.isInteger(version) && rest.length === 1 && request.method === 'GET') {
+            return await getPlan(env, principal.org, projectId, version)
+          }
+          if (Number.isInteger(version) && rest[1] === 'approve' && request.method === 'POST') {
+            return await approvePlan(env, principal.org, principal.id, projectId, version)
+          }
+        }
         if (/^\/api\/projects\/[^/]+\/config$/.test(path)) {
           if (request.method === 'GET') return await getProjectConfig(env, principal.org, segment(3))
           if (request.method === 'POST') return await putProjectConfig(request, env, principal.org, segment(3))
@@ -242,8 +261,6 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       // Never leak an internal message to a client.
       console.error('unhandled', error)
       return fail('internal', 'Something went wrong.', 500)
-    } finally {
-      void ctx
     }
   }
 }

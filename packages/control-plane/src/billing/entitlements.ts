@@ -210,6 +210,27 @@ export async function monthlySpendAllows(env: Env, orgId: string): Promise<Decis
   }
 }
 
+export function usageMonth(now = new Date()): string {
+  return now.toISOString().slice(0, 7)
+}
+
+/** Plan generations left this month. Checked before a generation, counted after one succeeds. */
+export async function canGeneratePlan(env: Env, orgId: string): Promise<Decision> {
+  const { plan, limits } = await entitlementFor(env, orgId)
+  const row = await env.DB.prepare('SELECT generations FROM ai_usage WHERE org = ?1 AND month = ?2')
+    .bind(orgId, usageMonth())
+    .first<{ generations: number }>()
+  const used = row?.generations ?? 0
+  if (used < limits.planGenerations) return { allowed: true, used, limit: limits.planGenerations }
+  return {
+    allowed: false,
+    used,
+    limit: limits.planGenerations,
+    reason: `The ${plan.name} plan includes ${limits.planGenerations} plan generations a month, and all are used.`,
+    ...(plan.id === 'basic' ? { upgradeTo: 'pro' as const } : {}),
+  }
+}
+
 export async function hasFeature(
   env: Env,
   orgId: string,

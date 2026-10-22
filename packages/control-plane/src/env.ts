@@ -20,6 +20,12 @@ export interface Env {
   /** The App's OAuth client id, for proving who completed an install. */
   GH_CLIENT_ID?: string
 
+  /** Model that writes project plans; defaults to claude-fable-5-1. */
+  PLAN_MODEL?: string
+  /** Where the published conventions are read from, and at which ref. */
+  CONVENTIONS_RAW_BASE?: string
+  CONVENTIONS_REF?: string
+
   // secrets, set by the deploy workflow
   CLERK_SECRET_KEY?: string
   RUNNER_SECRET_PEPPER?: string
@@ -28,6 +34,8 @@ export interface Env {
   GH_APP_PRIVATE_KEY?: string
   GH_WEBHOOK_SECRET?: string
   GH_CLIENT_SECRET?: string
+  /** Our key, for plan generation. Metered per org against the plan. */
+  ANTHROPIC_API_KEY?: string
 }
 
 export function json(body: unknown, status = 200): Response {

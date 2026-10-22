@@ -31,6 +31,11 @@ export interface PlanLimits {
   runHistoryDays: number
   /** 0 means no cap imposed by the plan; the runner's own budget still applies. */
   monthlySpendCapUsd: number
+  /**
+   * Plan generations and refinements per month. These run on our API key, so
+   * unlike runner spend they are our cost and need a ceiling.
+   */
+  planGenerations: number
 }
 
 export interface Plan {
@@ -56,6 +61,7 @@ export const PLANS: Record<PlanId, Plan> = {
       queuedJobs: 3,
       runHistoryDays: 7,
       monthlySpendCapUsd: 0,
+      planGenerations: 10,
     },
     features: {
       liveLogs: true,
@@ -77,6 +83,7 @@ export const PLANS: Record<PlanId, Plan> = {
       queuedJobs: 50,
       runHistoryDays: 90,
       monthlySpendCapUsd: 0,
+      planGenerations: 100,
     },
     features: {
       liveLogs: true,

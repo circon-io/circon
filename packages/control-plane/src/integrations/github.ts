@@ -205,6 +205,91 @@ export async function createPullRequest(
   return body.html_url ?? null
 }
 
+// --- repository contents -----------------------------------------------------
+
+async function repoToken(env: Env, installationId: string, fullName: string): Promise<string> {
+  return (await installationToken(env, installationId, [fullName.split('/')[1] ?? ''])).token
+}
+
+function headers(token: string): Record<string, string> {
+  return {
+    authorization: `Bearer ${token}`,
+    accept: 'application/vnd.github+json',
+    'user-agent': UA,
+    'content-type': 'application/json',
+  }
+}
+
+function toBase64(text: string): string {
+  const bytes = new TextEncoder().encode(text)
+  let binary = ''
+  for (const byte of bytes) binary += String.fromCharCode(byte)
+  return btoa(binary)
+}
+
+export type CommitOutcome =
+  | { kind: 'committed'; sha: string }
+  | { kind: 'pull-request'; url: string }
+  | { kind: 'failed'; reason: string }
+
+/**
+ * Write one file to the default branch; if the branch refuses a direct write
+ * (protection rules, required reviews), put it on a branch and open a PR
+ * instead. Either way the change ends up in front of the repository's own
+ * review process rather than around it.
+ */
+export async function commitFile(
+  env: Env,
+  installationId: string,
+  fullName: string,
+  input: { path: string; content: string; message: string; branch: string; prTitle: string; prBody: string; prBranch: string },
+): Promise<CommitOutcome> {
+  const token = await repoToken(env, installationId, fullName)
+  const api = `${API}/repos/${fullName}`
+
+  const shaOn = async (branch: string): Promise<string | undefined> => {
+    const res = await fetch(`${api}/contents/${input.path}?ref=${encodeURIComponent(branch)}`, { headers: headers(token) })
+    if (!res.ok) return undefined
+    return ((await res.json()) as { sha?: string }).sha
+  }
+  const put = (branch: string, sha: string | undefined) =>
+    fetch(`${api}/contents/${input.path}`, {
+      method: 'PUT',
+      headers: headers(token),
+      body: JSON.stringify({ message: input.message, content: toBase64(input.content), branch, ...(sha ? { sha } : {}) }),
+    })
+
+  const direct = await put(input.branch, await shaOn(input.branch))
+  if (direct.ok) {
+    const body = (await direct.json()) as { commit?: { sha?: string } }
+    return { kind: 'committed', sha: body.commit?.sha ?? '' }
+  }
+  if (direct.status === 404) return { kind: 'failed', reason: `the branch ${input.branch} does not exist` }
+
+  // Refused: branch off the default branch's head and propose it instead.
+  const ref = await fetch(`${api}/git/ref/heads/${encodeURIComponent(input.branch)}`, { headers: headers(token) })
+  if (!ref.ok) return { kind: 'failed', reason: `could not read ${input.branch} (HTTP ${ref.status})` }
+  const head = ((await ref.json()) as { object?: { sha?: string } }).object?.sha
+  const created = await fetch(`${api}/git/refs`, {
+    method: 'POST',
+    headers: headers(token),
+    body: JSON.stringify({ ref: `refs/heads/${input.prBranch}`, sha: head }),
+  })
+  if (!created.ok && created.status !== 422) {
+    return { kind: 'failed', reason: `could not create ${input.prBranch} (HTTP ${created.status})` }
+  }
+  const onBranch = await put(input.prBranch, await shaOn(input.prBranch))
+  if (!onBranch.ok) return { kind: 'failed', reason: `GitHub refused the file (HTTP ${onBranch.status})` }
+
+  const url = await createPullRequest(env, installationId, fullName, {
+    title: input.prTitle,
+    body: input.prBody,
+    head: input.prBranch,
+    base: input.branch,
+  })
+  return url ? { kind: 'pull-request', url } : { kind: 'failed', reason: 'GitHub declined to open the pull request' }
+}
+
 /** The account an installation is on, for display. Uses the App JWT. */
 export async function getInstallation(
   env: Env,

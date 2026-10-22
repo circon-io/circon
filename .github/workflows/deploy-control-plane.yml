@@ -72,7 +72,9 @@ jobs:
             --var STRIPE_PRICE_PRO:"${{ vars.STRIPE_PRICE_PRO }}" \
             --var GH_APP_ID:"${{ vars.GH_APP_ID }}" \
             --var GH_APP_SLUG:"${{ vars.GH_APP_SLUG }}" \
-            --var GH_CLIENT_ID:"${{ vars.GH_CLIENT_ID }}"
+            --var GH_CLIENT_ID:"${{ vars.GH_CLIENT_ID }}" \
+            --var PLAN_MODEL:"${{ vars.PLAN_MODEL }}" \
+            --var CONVENTIONS_REF:"${{ vars.CONVENTIONS_REF }}"
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
@@ -122,6 +124,8 @@ jobs:
                    "an uninstalled GitHub App will not deactivate its projects."
           optional GH_CLIENT_SECRET   "${{ secrets.GH_CLIENT_SECRET }}" \
                    "GitHub cannot be connected: the install callback refuses unverified installs."
+          optional ANTHROPIC_API_KEY  "${{ secrets.ANTHROPIC_API_KEY }}" \
+                   "plans cannot be generated from the dashboard."
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}

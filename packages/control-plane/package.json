@@ -13,6 +13,7 @@
     "test": "node --test 'src/**/*.test.ts'"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^1.1.0",
     "jose": "^5.9.6",
     "stripe": "^22.4.0"
   },
