@@ -17,7 +17,7 @@ import { compareVersions } from './exec.ts'
  * runner resolves the newest tag it can actually satisfy.
  */
 
-/** Front-matter at the top of ARCHITECTURE.md, e.g. `requires-cli: >=0.4.0`. */
+/** A line in ARCHITECTURE.md such as `requires-cli: >=0.4.0`. */
 const REQUIRES = /^\s*requires-cli:\s*>=\s*([\d.]+)\s*$/m
 
 export interface Resolution {
@@ -127,12 +127,11 @@ export async function detectDrift(cliVersion: string): Promise<Drift[]> {
     })
   }
 
-  // Only check tools the conventions name explicitly and that we can probe
-  // cheaply. Anything vaguer is left to the reviewer.
+  // Only machine-level tools the conventions name explicitly. Expo and wrangler
+  // are project devDependencies that `pnpm install` brings in, so probing them
+  // as globals reported drift on every correctly provisioned runner.
   const probes: Array<[RegExp, string, string[]]> = [
     [/\bpnpm\b/, 'pnpm', ['--version']],
-    [/\bExpo\b/i, 'expo', ['--version']],
-    [/\bwrangler\b/i, 'wrangler', ['--version']],
   ]
 
   for (const [mention, binary, args] of probes) {
