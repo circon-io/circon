@@ -7,7 +7,8 @@ circon project. Change them in the conventions repository, not here.
 
 ## This project
 
-- `PRD.md` says what to build; only humans edit it. `progress.txt` is the
+- `PRD.md` says what to build; only humans edit it. Its `Proposed additions`
+  are ideas nobody has accepted: never build them. `progress.txt` is the
   agent's running log; task state lives in `.circon/progress.json`.
 - `circon run` drives the autonomous loop from this directory. The gate lives in
   `.circon/flows/`, and `.circon/expected-web.txt` lists the accessibility

@@ -38,6 +38,19 @@ Some prose that mentions - [ ] nothing in particular inline.
     )
   })
 
+  test('proposed additions are never tasks, and later sections still are', () => {
+    writePrd(`## Task Backlog
+- [ ] Build the login screen
+
+## Proposed additions
+- [ ] Undo after deleting an item
+
+## Later
+- [ ] Export to CSV
+`)
+    assert.deepEqual(readTasks(dir).map((t) => t.text), ['Build the login screen', 'Export to CSV'])
+  })
+
   test('a checkbox already ticked by a human counts as done', () => {
     writePrd('- [x] Already handled\n- [ ] Not yet\n')
     const tasks = readTasks(dir)

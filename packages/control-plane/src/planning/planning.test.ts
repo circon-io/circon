@@ -58,6 +58,25 @@ describe('PRD checks', () => {
     assert.ok(check.errors.includes('has duplicate tasks'))
   })
 
+  test('proposed additions are not tasks, and may not be written as tasks', () => {
+    const proposed = `${GOOD_PRD}\n## Proposed additions\n1. Undo after deleting an item — a mistap should not lose data\n`
+    const check = checkPrd(proposed)
+    assert.deepEqual(check.errors, [])
+    assert.equal(check.tasks.length, 3)
+
+    // Refused, and not counted either way: the runner would skip it.
+    const asTask = `${GOOD_PRD}\n## Proposed additions\n- [ ] Undo after deleting an item\n`
+    const refused = checkPrd(asTask)
+    assert.ok(refused.errors.some((e) => e.includes('Proposed additions')))
+    const dir = mkdtempSync(join(tmpdir(), 'circon-prd-'))
+    try {
+      writeFileSync(join(dir, 'PRD.md'), asTask)
+      assert.deepEqual(readTasks(dir).map((t) => t.text), refused.tasks)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
   test('a fenced answer is unwrapped', () => {
     assert.equal(extractPrd('```markdown\n# A\n```'), '# A\n')
   })

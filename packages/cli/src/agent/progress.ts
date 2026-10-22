@@ -30,6 +30,12 @@ interface ProgressFile {
 
 /** Only `- [ ]` / `- [x]` bullets count, so prose in the PRD is never a task. */
 const TASK_LINE = /^[-*]\s+\[([ xX])\]\s+(.+?)\s*$/
+const HEADING = /^##\s+(.+?)\s*$/
+/**
+ * The planner's ideas the owner has not accepted. Never a source of tasks, even
+ * if a checkbox ends up there: building one would spend money nobody approved.
+ */
+const PROPOSALS = 'proposed additions'
 
 export function taskId(text: string): string {
   return createHash('sha1').update(text.trim()).digest('hex').slice(0, 12)
@@ -64,7 +70,10 @@ export function readTasks(cwd: string, prdFile = 'PRD.md'): Task[] {
   const progress = readProgress(cwd)
   const tasks: Task[] = []
 
+  let section = ''
   for (const line of readFileSync(prd, 'utf8').split('\n')) {
+    section = HEADING.exec(line)?.[1]?.toLowerCase() ?? section
+    if (section === PROPOSALS) continue
     const match = line.match(TASK_LINE)
     if (!match) continue
     const checked = match[1] !== ' '

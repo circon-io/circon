@@ -53,11 +53,26 @@ one task at a time, on a machine that tests every change before committing it.
 A human reviews your PRD before any of that happens.
 
 What makes a PRD good here:
+- It thinks about the product, not only the features. Before writing, consider
+  who uses this and what would make it a pleasure to use: the first run and
+  onboarding, empty states that tell the user what to do next, feedback for
+  every action, error copy that says how to recover, and the edge cases of the
+  core loop. A production-ready app handles these; a demo does not.
 - It decides. Where the idea is vague, choose the simplest version that
   delivers the core value, and record the choice in Scope. Do not ask questions.
+- It proposes, but does not decide for the owner. Ideas the owner did not ask
+  for, but that would make the product clearly better, go in "Proposed
+  additions": first the line "Not accepted. Nothing here is built until the
+  owner moves it into the Task Backlog.", then a numbered list
+  "1. <idea> — <why it matters>", never tasks. At most 8, strongest first.
+- When asked to promote a proposal, turn it into backlog tasks in the right
+  place in the order, and remove it from Proposed additions.
 - Design principles that resolve future arguments, stating the trade-off.
 - User flows that name every state the UI must handle (loading, empty, error),
   because each state becomes something the app must render and the gate checks.
+- Tasks that build a screen name its states, its visible copy and its
+  accessibility labels, so the quality bar is part of the task, not polish
+  left for later.
 - A task backlog the agent can execute in order. Each task is one line, small
   enough to finish and verify in a single iteration (roughly an hour of focused
   work), and independently testable. Order them so each builds on finished ones:
@@ -72,8 +87,10 @@ What makes a PRD good here:
 
 Output format — follow it exactly:
 - Only the PRD markdown. No preamble, no closing remarks, no code fence around it.
-- Use the section headings of the template below, in its order.
-- Every task line is exactly "- [ ] <task>". No nested lists under tasks.
+- Use the section headings of the template below, in its order, then end with
+  "## Proposed additions" (omit it if you have nothing worth proposing).
+- Every task line is exactly "- [ ] <task>". No nested lists under tasks. Only
+  the Task Backlog has task lines.
 - Never leave a CIRCON-UNFILLED comment: write the section instead.
 
 <conventions ref="${conventions.ref}">

@@ -223,6 +223,51 @@ locally, without any SSH orchestration.
 
 ---
 
+## 7. From working to good
+
+The gate proves the app works. Nothing yet asks whether it is good to use, or
+whether its security holds up across the whole codebase rather than a diff.
+These items come after §0. They add mechanism on top of a loop no one has seen
+finish a task.
+
+- [x] The planner thinks about the product (onboarding, empty states, error
+      copy). It puts ideas the owner did not ask for under `## Proposed
+      additions` as a numbered list. `readTasks` never takes a task from that
+      section, and `checkPrd` refuses `- [ ]` lines there
+- [x] The build prompt has a UX self-check for UI tasks, and the reviewer
+      flags user-facing gaps (unhandled states, text outside i18n, missing
+      labels)
+- [ ] Conventions repo: add `## Proposed additions` to `templates/PRD.md`
+- [ ] **Missing-keys checklist before the run.** The control plane compares
+      `.env.example` on the default branch with the project's secrets. The
+      dashboard lists what is missing, with each comment as the instructions
+      for getting it. The planner can name the external services up front
+- [ ] **Design review, then polish.** Capture a screenshot of every route
+      (Expo Router web export, `agent-device`). A multimodal reviewer looks at
+      them, advisory only, in the same finding format as code review. When the
+      PRD is complete, run up to `polishIterations` (default 0) on the findings,
+      kept as generated tasks in `progress.json` and never in `PRD.md`, through
+      the same gate. Screens behind auth need a Clerk testing token, so start
+      with public routes
+- [ ] **Whole-repo security audit**, a new `audit` role so it can be the
+      strongest model or a second vendor. Run it once when all tasks are done:
+      `requireRole` on every route, webhook signatures, secrets in the client
+      bundle, validation at the `packages/shared` contract. Findings go in the
+      PR and the release report
+
+**Why the polish stays advisory:** screenshots are pixels, and the gate never
+fails on pixels. A model's taste is input for the next iteration, just like the
+code reviewer's notes. It is not a verdict.
+
+**Why proposals are not tasks:** the owner approves the plan. An idea the
+planner invented should cost money only after someone chose it.
+
+**Why the build has to run without keys:** a missing key in the middle of a run
+looks like a gate failure, and three of those trip the breaker. Real keys
+matter for deploys and e2e against real services, not for building.
+
+---
+
 ## Later
 
 - **GitLab and other providers.** `integrations.provider` already exists. Keep
