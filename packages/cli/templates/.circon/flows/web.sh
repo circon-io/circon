@@ -66,8 +66,10 @@ if [ -n "$API_DIR" ]; then
   ( cd "$API_DIR" && PORT="$API_PORT" pnpm dev ) > "$API_LOG" 2>&1 &
   API_PID=$!
 
+  # /health, not /: the API has no root route, so probing / got a 404 every
+  # time and the gate always waited the full 30 seconds.
   for _ in $(seq 1 30); do
-    curl -sf -o /dev/null "http://localhost:$API_PORT" 2>/dev/null && break
+    curl -sf -o /dev/null "http://localhost:$API_PORT/health" 2>/dev/null && break
     kill -0 "$API_PID" 2> /dev/null || break
     sleep 1
   done
