@@ -250,6 +250,22 @@ describe('the loop', () => {
     assert.ok(!git('ls-tree', '--name-only', 'main').includes('scaffolded.txt'), 'main is untouched; the PR carries it')
   })
 
+  test("a job's secrets are visible to the agent during the run and gone after it", async () => {
+    prd(['add a cart'])
+    let seen: string | undefined
+    const { backend: b } = backend('claude-code', (req) => {
+      seen = process.env['CLOUDFLARE_API_TOKEN']
+      return doesTheTask(req)
+    })
+    const before = process.env['CLOUDFLARE_API_TOKEN']
+    await runCommand(1, {
+      config: { agents: { build: { backend: 'claude-code' } } },
+      secrets: { CLOUDFLARE_API_TOKEN: 'cf-job-only' },
+    }, deps(b).d)
+    assert.equal(seen, 'cf-job-only')
+    assert.equal(process.env['CLOUDFLARE_API_TOKEN'], before)
+  })
+
   test('refuses to start when the build backend cannot run', async () => {
     prd(['add a cart'])
     const { backend: b } = backend('claude-code', doesTheTask)

@@ -61,6 +61,15 @@ export function existingScreenshots(cwd: string): string[] {
     .map((f) => join(SHOT_DIR, f))
 }
 
+/**
+ * A committed screenshot as an image GitHub renders in a PR body, including for
+ * a private repository when the reader has access to it.
+ */
+export function screenshotUrl(slug: string, branch: string, path: string): string {
+  const [owner, repo] = slug.split('__')
+  return `https://github.com/${owner}/${repo}/blob/${branch}/${path.split('\\').join('/')}?raw=true`
+}
+
 export function prBody(summary: RunSummary, screenshots: string[]): string {
   const lines: string[] = []
 
@@ -99,7 +108,7 @@ export function prBody(summary: RunSummary, screenshots: string[]): string {
     lines.push('## Screenshots', '')
     lines.push('_Captured after the gate passed, for review only — the gate')
     lines.push('asserts on the accessibility tree, never on pixels._', '')
-    for (const s of screenshots) lines.push(`![${s}](${s})`)
+    for (const s of screenshots) lines.push(`![${s.split('/').pop()?.split('?')[0] ?? 'screenshot'}](${s})`)
     lines.push('')
   }
 

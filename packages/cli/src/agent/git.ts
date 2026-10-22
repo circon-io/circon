@@ -66,6 +66,14 @@ export class Repo {
     if (!created.ok) throw new Error(`could not create ${branch}: ${created.stderr.trim()}`)
   }
 
+  /** `owner__repo` for a github.com origin, the form circon names projects by. */
+  async originSlug(): Promise<string | null> {
+    const r = await this.git('remote', 'get-url', 'origin')
+    if (!r.ok) return null
+    const m = r.stdout.trim().match(/github\.com[:/]([^/:]+)\/([^/]+?)(?:\.git)?$/)
+    return m?.[1] && m[2] ? `${m[1]}__${m[2]}` : null
+  }
+
   async fetch(): Promise<boolean> {
     if (!(await this.hasRemote())) return false
     return (await this.git('fetch', '--quiet', '--all')).ok

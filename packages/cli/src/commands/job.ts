@@ -9,7 +9,7 @@ import { runCommand, type RunOptions } from './run.ts'
 import { resolve as resolveConventions } from '../core/conventions.ts'
 import { cliVersion } from './update.ts'
 import { scaffoldIfMissing } from './init.ts'
-import { cloneCredential } from '../agent/control-plane.ts'
+import { cloneCredential, jobSecrets } from '../agent/control-plane.ts'
 import {
   configureCredentialHelper, credentialFlags, slugToHttps,
 } from '../agent/git-credential.ts'
@@ -155,6 +155,13 @@ export async function jobCommand(slug: string | undefined, opts: JobOptions = {}
   // runCommand works on process.cwd(), so move there rather than threading a
   // directory through every call site.
   const { maxLoops, remote: _remote, ...runOptions } = opts
+  if (opts.jobId) {
+    const secrets = await jobSecrets(opts.jobId)
+    if (secrets && Object.keys(secrets).length) {
+      runOptions.secrets = secrets
+      ui.dim(`${Object.keys(secrets).length} secret(s) from the dashboard for this job`)
+    }
+  }
   const previous = process.cwd()
   try {
     process.chdir(dir)

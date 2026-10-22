@@ -13,7 +13,7 @@ import { RunBudget } from '../agent/spend.ts'
 import { readTasks, openTasks, markComplete, inferCompletedTask, allComplete } from '../agent/progress.ts'
 import { preflight, classifyFailure, backoffMs } from '../agent/health.ts'
 import {
-  captureScreenshots, existingScreenshots, openPullRequest, prBody, prTitle, type RunSummary,
+  captureScreenshots, existingScreenshots, openPullRequest, prBody, prTitle, screenshotUrl, type RunSummary,
 } from '../agent/review.ts'
 import { collect } from './gc.ts'
 import {
@@ -67,6 +67,12 @@ export interface RunOptions {
    * is committed there. A job uses it to scaffold a repository on its first run.
    */
   prepare?: (cwd: string) => Promise<boolean>
+  /**
+   * Credentials for this run only (the dashboard's org and project secrets).
+   * Set in the environment for the run's duration and restored afterwards,
+   * so the agent, the gate and deploy scripts see them and nothing outlives it.
+   */
+  secrets?: Record<string, string>
 }
 
 /** Everything the loop decides with, injectable so the loop itself is testable. */
@@ -130,6 +136,12 @@ export async function runCommand(
   const settings = isEnrolled() ? await fetchConfig(project) : null
   let cfg = effectiveConfig(opts.config ?? settings?.config)
   setOutputSink((line) => channel.log(`${line}\n`))
+
+  const previousEnv = new Map<string, string | undefined>()
+  for (const [key, value] of Object.entries(opts.secrets ?? {})) {
+    previousEnv.set(key, process.env[key])
+    process.env[key] = value
+  }
 
   // Declared out here so the finally can report even an aborted run: a record
   // left at 'running' is worse than one marked failed, because nothing ever
@@ -518,8 +530,17 @@ export async function runCommand(
       return 0
     }
 
+    // Screenshots are committed to the run branch, so the PR and the release
+    // report can show them; a path that exists only on the runner shows nothing.
+    const shots = [...new Set([...(await captureScreenshots(cwd)), ...existingScreenshots(cwd)])]
+    if (shots.length) {
+      await repo.stageAll()
+      if (await repo.hasStagedChanges()) await repo.commit('chore: screenshots for review')
+    }
     const pushed = await repo.push(branch)
-    const screenshots = [...(await captureScreenshots(cwd)), ...existingScreenshots(cwd)]
+    const slug = /^[A-Za-z0-9][\w.-]*__[A-Za-z0-9][\w.-]*$/.test(project) ? project : await repo.originSlug()
+    const screenshots = slug && pushed ? shots.map((path) => screenshotUrl(slug, branch, path)) : shots
+    if (slug && pushed && screenshots.length) report.screenshots = screenshots
 
     const summary: RunSummary = {
       project,
@@ -594,6 +615,10 @@ export async function runCommand(
       })
     }
     setOutputSink(null)
+    for (const [key, value] of previousEnv) {
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
     releaseLock()
     clearStop()
   }

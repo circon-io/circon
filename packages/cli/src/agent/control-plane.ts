@@ -166,6 +166,19 @@ export async function claimJob(): Promise<QueuedJob | null> {
   return data?.job ?? null
 }
 
+/**
+ * The org's machine secrets and the job's project secrets, for this job only.
+ * Held in memory for the run; never written to disk.
+ */
+export async function jobSecrets(jobId: string): Promise<Record<string, string> | null> {
+  const enrollment = readEnrollment()
+  if (!enrollment) return null
+  const data = (await request(enrollment, `/api/runner/secrets?job=${encodeURIComponent(jobId)}`)) as
+    | { secrets?: Record<string, string> }
+    | null
+  return data?.secrets ?? null
+}
+
 export interface RunRecord {
   runId: string
   projectSlug: string
@@ -179,6 +192,8 @@ export interface RunRecord {
   jobId?: string
   /** Which backend and model filled each role, for the run view. */
   agents?: Record<string, { backend: string; model?: string }>
+  /** Committed screenshots, as URLs into the run's branch. */
+  screenshots?: string[]
 }
 
 export async function reportRun(record: RunRecord): Promise<boolean> {
