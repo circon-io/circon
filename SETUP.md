@@ -66,14 +66,15 @@ keys and account ids belong here, not in secrets, so they can be diffed.
 | `CONVENTIONS_REF` | Optional. The conventions tag plans are written against, e.g. `v1.0.0`; empty means `main`. Keep it at the tag runners resolve to, so a plan never asks for what a runner will not build. |
 | `CONTROL_PLANE_DOMAIN` | Hostname for the API Worker, e.g. `api.circon.io`. Zone must be on Cloudflare. |
 | `DASHBOARD_DOMAIN` | Hostname for the dashboard, e.g. `app.circon.io` |
+| `WEBSITE_DOMAIN` | Hostname for the public website, e.g. `circon.io`. Also becomes every canonical and sitemap URL. |
 | `CONTROL_PLANE_URL` | `https://<CONTROL_PLANE_DOMAIN>` |
 | `DASHBOARD_ORIGIN` | `https://<DASHBOARD_DOMAIN>` |
 
 ### Domains
 
-Both Workers deploy to hostnames you choose rather than `workers.dev` —
-`workers_dev` is `false` in both `wrangler.jsonc`, and the hostname is passed as
-`--domain` at deploy time.
+All three Workers (control plane, dashboard, website) deploy to hostnames you
+choose rather than `workers.dev` — `workers_dev` is `false` in every
+`wrangler.jsonc`, and the hostname is passed as `--domain` at deploy time.
 
 Requirements:
 
@@ -302,10 +303,10 @@ rather than reaching for the template.
                 STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET,
                 GH_APP_PRIVATE_KEY, GH_WEBHOOK_SECRET, GH_CLIENT_SECRET,
                 ANTHROPIC_API_KEY, SECRETS_MASTER_KEY)
-[ ] 12 variables (CLOUDFLARE_ACCOUNT_ID, CLERK_JWKS_URL, CLERK_ISSUER,
+[ ] 13 variables (CLOUDFLARE_ACCOUNT_ID, CLERK_JWKS_URL, CLERK_ISSUER,
                   NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY, STRIPE_PRICE_PRO,
                   GH_APP_ID, GH_APP_SLUG, GH_CLIENT_ID,
-                  CONTROL_PLANE_DOMAIN, DASHBOARD_DOMAIN,
+                  CONTROL_PLANE_DOMAIN, DASHBOARD_DOMAIN, WEBSITE_DOMAIN,
                   CONTROL_PLANE_URL, DASHBOARD_ORIGIN)
 [ ] Zone on Cloudflare, token has zone-level Workers Routes/DNS/Zone perms
 [ ] workers.dev subdomain registered on the account (required even when unused)

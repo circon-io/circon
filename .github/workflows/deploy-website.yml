@@ -1,0 +1,53 @@
+name: Deploy website
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'packages/website/**'
+      - '.github/workflows/deploy-website.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-website
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @circon/website typecheck
+      - run: pnpm --filter @circon/website test
+
+      # A static export: `next build` writes out/, wrangler uploads it as
+      # static assets plus the few lines of worker/index.ts that answer `/`.
+      # No secrets, nothing to provision. NEXT_PUBLIC_SITE_URL is baked into
+      # every canonical, hreflang and sitemap URL, so it must be the domain
+      # the site is deployed to. On the zone's apex, --domain creates the DNS
+      # record itself; the apex must have no other A/AAAA/CNAME record.
+      # `pnpm run deploy`, not `pnpm deploy` — see deploy-dashboard.yml.
+      - name: Build and deploy
+        working-directory: packages/website
+        run: |
+          set -euo pipefail
+          if [ -z "${{ vars.WEBSITE_DOMAIN }}" ]; then
+            echo "::error::WEBSITE_DOMAIN variable is required — canonical URLs are built from it."
+            exit 1
+          fi
+          pnpm run deploy -- --domain "${{ vars.WEBSITE_DOMAIN }}"
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          NEXT_PUBLIC_SITE_URL: https://${{ vars.WEBSITE_DOMAIN }}
+          NEXT_PUBLIC_DASHBOARD_URL: ${{ vars.DASHBOARD_ORIGIN }}

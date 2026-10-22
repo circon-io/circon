@@ -1,0 +1,11 @@
+# Workers static assets apply these to every file served from out/.
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), interest-cohort=()
+  Strict-Transport-Security: max-age=63072000; includeSubDomains
+  X-Frame-Options: DENY
+
+# Hashed file names: safe to cache forever.
+/_next/static/*
+  Cache-Control: public, max-age=31536000, immutable

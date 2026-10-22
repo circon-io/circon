@@ -200,7 +200,9 @@ the iOS simulator can't run on Linux.
 ## The hosted parts
 
 `packages/control-plane` (a Cloudflare Worker with Durable Objects and D1) and
-`packages/dashboard` (Next.js on Cloudflare) are the fleet side. They handle
+`packages/dashboard` (Next.js on Cloudflare) are the fleet side.
+`packages/website` is the public landing page in English and German: a static
+export served by a Worker. They handle
 projects connected through a GitHub App, runners, jobs, live logs and billing.
 [SETUP.md](SETUP.md) covers deploying them.
 

@@ -16,6 +16,9 @@ Two things with very different change rates, deliberately separated:
 - **`packages/cli`** — `@circon/cli`, a zero-runtime-dependency TypeScript CLI
   that converges the machine, runs the agent loop, and reports on it.
 
+The hosted side is `packages/control-plane`, `packages/dashboard` and
+`packages/website` (the static public site).
+
 It used to be one 1851-line bash script that generated five more bash scripts
 through 20 heredocs. That script could not be re-run (`snap install` aborted it
 under `set -e`), appended duplicate lines to `/etc/sysctl.conf` every run, and
@@ -32,6 +35,8 @@ pnpm --filter @circon/cli build       # tsc → dist/
 pnpm --filter @circon/cli typecheck
 pnpm --filter @circon/cli test        # node:test, runs .ts directly
 bash -n init.sh                       # the bootstrap must still parse
+pnpm --filter @circon/website build   # static export → packages/website/out
+pnpm --filter @circon/website preview # build, then serve through the Worker
 
 # One test file, or one test by name
 cd packages/cli
@@ -144,6 +149,33 @@ the feedback-loop tiers are described once in `components/loops/tiers.ts`.
 against the fixtures in `lib/preview.ts`. Use it for design work and
 screenshots. It is compiled out of production builds (the flag is checked
 together with `NODE_ENV`).
+
+### The website
+
+`packages/website`: the public landing page, same stack and tokens as the
+dashboard, but a **static export** (`output: 'export'` → `out/`). Workers static
+assets serve it; `worker/index.ts` runs for `/` only (`run_worker_first`) and
+redirects to `/en/` or `/de/` by cookie, then Accept-Language. Nothing else on
+the site executes at request time, so no feature that needs a server (proxy,
+`cookies()`, rewrites, image optimization) can be used.
+
+- **Languages stay in sync by type.** `i18n/dictionaries/en.ts` is the shape;
+  `de.ts` is typed against it, so a missing key or a list of different length
+  fails typecheck. Pages and their translated slugs (`impressum` ⇄ `imprint`)
+  are declared once in `i18n/config.ts`; the switcher, hreflang and the sitemap
+  all read that table.
+- **Legal pages are a legal requirement, not decoration.** The imprint (§ 5 DDG)
+  and the privacy policy (Art. 13 GDPR) read the operator from
+  `content/company.ts`. The privacy policy states there is no tracking, no
+  third-party embed and nothing stored without a click; adding any of those
+  means changing it in the same commit.
+- **Content must be in the static HTML.** Scroll reveals hide elements only
+  under the `.js` class the head script sets, and the hero animates in CSS, so
+  no-JS readers and crawlers see everything. framer-motion's `initial` would
+  ship `opacity: 0` in the HTML; don't use it for content.
+- Metadata images are route handlers (`og.png/route.tsx`) rather than the
+  `opengraph-image` convention, which a static export writes without an
+  extension, so it would be served untyped.
 
 ### The GitHub connection
 
