@@ -180,6 +180,36 @@ export async function canQueueJob(env: Env, orgId: string): Promise<Decision> {
   }
 }
 
+/**
+ * The plan's monthly spend ceiling, across every runner in the org.
+ *
+ * Checked when work is queued, so it stops new jobs rather than killing one
+ * mid-run — each runner's own per-run cap is what bounds a job in flight.
+ */
+export async function monthlySpendAllows(env: Env, orgId: string): Promise<Decision> {
+  const { plan, limits } = await entitlementFor(env, orgId)
+  if (limits.monthlySpendCapUsd <= 0) return { allowed: true }
+
+  const monthStart = new Date()
+  monthStart.setUTCDate(1)
+  monthStart.setUTCHours(0, 0, 0, 0)
+  const row = await env.DB.prepare(
+    'SELECT COALESCE(SUM(cost_usd), 0) AS total FROM runs WHERE org = ?1 AND started_at >= ?2',
+  )
+    .bind(orgId, monthStart.toISOString())
+    .first<{ total: number }>()
+  const used = row?.total ?? 0
+
+  if (used < limits.monthlySpendCapUsd) return { allowed: true, used, limit: limits.monthlySpendCapUsd }
+  return {
+    allowed: false,
+    used,
+    limit: limits.monthlySpendCapUsd,
+    reason: `The ${plan.name} plan's $${limits.monthlySpendCapUsd} monthly spend cap is reached.`,
+    ...(plan.id === 'basic' ? { upgradeTo: 'pro' as const } : {}),
+  }
+}
+
 export async function hasFeature(
   env: Env,
   orgId: string,

@@ -13,6 +13,8 @@ import type { Env } from './env.ts'
 
 const LOG_LINES = 500
 const OFFLINE_AFTER_MS = 90_000
+/** `runners.last_seen_at` is for reclaiming dead jobs, not live status: once a minute is plenty. */
+const PERSIST_SEEN_MS = 60_000
 
 export interface RunnerState {
   status: 'idle' | 'running' | 'offline'
@@ -26,7 +28,7 @@ export interface RunnerState {
 }
 
 type Inbound =
-  | { type: 'hello'; cliVersion?: string; platform?: string }
+  | { type: 'hello'; cliVersion?: string; platform?: string; conventionsRef?: string }
   | { type: 'heartbeat'; state: Partial<RunnerState> }
   | { type: 'log'; lines: string[] }
   | { type: 'run-started'; runId: string; project: string; branch: string }
@@ -35,8 +37,9 @@ type Inbound =
 type Outbound =
   | { type: 'state'; state: RunnerState }
   | { type: 'log'; lines: string[] }
-  | { type: 'command'; command: 'stop' | 'run'; project?: string; maxLoops?: number }
+  | { type: 'command'; command: 'stop' | 'run' }
   | { type: 'config-changed' }
+  | { type: 'prd-changed'; project: string }
 
 export class RunnerDO extends DurableObject<Env> {
   private logs: string[] = []
@@ -51,6 +54,11 @@ export class RunnerDO extends DurableObject<Env> {
       }
       const pair = new WebSocketPair()
       const [client, server] = [pair[0], pair[1]]
+
+      // The object is addressed by runner id but cannot read its own name, so
+      // the Worker passes it along; it is what lets the object write to D1.
+      const runner = url.searchParams.get('runner')
+      if (runner) await this.ctx.storage.put('runnerId', runner)
 
       // Hibernation: the runtime holds the socket, not this object.
       this.ctx.acceptWebSocket(server, [url.searchParams.get('role') ?? 'observer'])
@@ -88,12 +96,25 @@ export class RunnerDO extends DurableObject<Env> {
       case 'hello':
       case 'heartbeat': {
         const patch = message.type === 'heartbeat' ? message.state : {}
+        const previous = await this.currentState()
         this.state = {
-          ...(await this.currentState()),
+          ...previous,
           ...patch,
-          status: patch.status ?? 'idle',
+          status: patch.status ?? (message.type === 'hello' && previous.status === 'running' ? 'running' : 'idle'),
           lastSeenAt: new Date().toISOString(),
         }
+        if (this.state.status !== 'running') {
+          delete this.state.runId
+          delete this.state.iteration
+        }
+        await this.persistSeen(
+          message.type === 'hello'
+            ? {
+                ...(message.cliVersion ? { cliVersion: message.cliVersion } : {}),
+                ...(message.conventionsRef ? { conventionsRef: message.conventionsRef } : {}),
+              }
+            : undefined,
+        )
         await this.ctx.storage.put('state', this.state)
         // A missed heartbeat is what makes a runner show as offline, so an
         // alarm is scheduled rather than relying on the dashboard polling.
@@ -160,6 +181,32 @@ export class RunnerDO extends DurableObject<Env> {
       this.state = { ...current, status: 'offline' }
       await this.ctx.storage.put('state', this.state)
       this.broadcast({ type: 'state', state: this.state }, 'observer')
+    }
+  }
+
+  /**
+   * Write `last_seen_at` through to D1, throttled; versions are written whenever
+   * a hello carries them. Failure is swallowed: D1 being slow must never drop a
+   * runner's socket.
+   */
+  private async persistSeen(versions?: { cliVersion?: string; conventionsRef?: string }): Promise<void> {
+    const runnerId = await this.ctx.storage.get<string>('runnerId')
+    if (!runnerId) return
+    const last = (await this.ctx.storage.get<number>('persistedAt')) ?? 0
+    const hasVersions = Boolean(versions?.cliVersion || versions?.conventionsRef)
+    if (!hasVersions && Date.now() - last < PERSIST_SEEN_MS) return
+    try {
+      await this.env.DB.prepare(
+        `UPDATE runners SET last_seen_at = ?1,
+           cli_version = COALESCE(?2, cli_version),
+           conventions_ref = COALESCE(?3, conventions_ref)
+         WHERE id = ?4`,
+      )
+        .bind(new Date().toISOString(), versions?.cliVersion ?? null, versions?.conventionsRef ?? null, runnerId)
+        .run()
+      await this.ctx.storage.put('persistedAt', Date.now())
+    } catch (error) {
+      console.error('could not persist last_seen_at', error)
     }
   }
 
