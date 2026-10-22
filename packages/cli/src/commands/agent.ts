@@ -28,6 +28,7 @@ type Inbound =
   | { type: 'command'; command: 'stop' | 'run' }
   | { type: 'config-changed' }
   | { type: 'prd-changed'; project: string }
+  | { type: 'secrets-changed'; project: string }
 
 /**
  * Changes the dashboard made while a run was going. The loop takes them at its
@@ -36,6 +37,7 @@ type Inbound =
 export class PendingRefresh implements RefreshSignals {
   private config = false
   private prd = false
+  private secrets = false
   private readonly project: () => string | null
 
   constructor(project: () => string | null) {
@@ -45,12 +47,14 @@ export class PendingRefresh implements RefreshSignals {
   note(message: Inbound): void {
     if (message.type === 'config-changed') this.config = true
     if (message.type === 'prd-changed' && message.project === this.project()) this.prd = true
+    if (message.type === 'secrets-changed' && message.project === this.project()) this.secrets = true
   }
 
-  take(): { config: boolean; prd: boolean } {
-    const taken = { config: this.config, prd: this.prd }
+  take(): { config: boolean; prd: boolean; secrets: boolean } {
+    const taken = { config: this.config, prd: this.prd, secrets: this.secrets }
     this.config = false
     this.prd = false
+    this.secrets = false
     return taken
   }
 }

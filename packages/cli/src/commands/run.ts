@@ -17,9 +17,11 @@ import {
 } from '../agent/review.ts'
 import { collect } from './gc.ts'
 import {
-  reportRun, cloneCredential, requestPullRequest, fetchConfig, isEnrolled, type RunRecord,
+  reportRun, cloneCredential, requestPullRequest, fetchConfig, isEnrolled, requestSecret, jobSecrets,
+  type RunRecord,
 } from '../agent/control-plane.ts'
 import { silentChannel, type RunChannel } from '../agent/channel.ts'
+import { parseSecretRequests, SECRET_INSTRUCTION } from '../agent/requests.ts'
 import {
   realBackends, resolveRoles, describeRoles, type Backends, type AgentBackend, type AgentResult, type Billing,
 } from '../agent/backends/index.ts'
@@ -48,7 +50,7 @@ function notesSince(cwd: string, startLines: number): string {
 
 /** What the dashboard changed while the run was going; read at iteration boundaries. */
 export interface RefreshSignals {
-  take(): { config: boolean; prd: boolean }
+  take(): { config: boolean; prd: boolean; secrets?: boolean }
 }
 
 export interface RunOptions {
@@ -138,10 +140,13 @@ export async function runCommand(
   setOutputSink((line) => channel.log(`${line}\n`))
 
   const previousEnv = new Map<string, string | undefined>()
-  for (const [key, value] of Object.entries(opts.secrets ?? {})) {
-    previousEnv.set(key, process.env[key])
-    process.env[key] = value
+  const applySecrets = (secrets: Record<string, string>) => {
+    for (const [key, value] of Object.entries(secrets)) {
+      if (!previousEnv.has(key)) previousEnv.set(key, process.env[key])
+      process.env[key] = value
+    }
   }
+  applySecrets(opts.secrets ?? {})
 
   // Declared out here so the finally can report even an aborted run: a record
   // left at 'running' is worse than one marked failed, because nothing ever
@@ -278,6 +283,9 @@ export async function runCommand(
     let lastFailure = ''
     let verifyNotes = ''
     let gateTiers: string[] = []
+    // Credentials the agent asked for that nobody has supplied yet.
+    const requested = new Set<string>()
+    let waitingFor = ''
     let ended: 'complete' | 'stopped' | 'budget' | 'limit' | 'usage-limit' = 'limit'
 
     /**
@@ -303,7 +311,19 @@ export async function runCommand(
 
     for (let i = 1; i <= maxLoops; i++) {
       // Dashboard edits land here, between iterations, never inside one.
-      const changed = opts.refresh?.take() ?? { config: false, prd: false }
+      const changed = opts.refresh?.take() ?? { config: false, prd: false, secrets: false }
+      if (changed.secrets && opts.jobId) {
+        const fresh = await jobSecrets(opts.jobId)
+        if (fresh) {
+          applySecrets(fresh)
+          const arrived = [...requested].filter((name) => fresh[name])
+          for (const name of arrived) requested.delete(name)
+          if (arrived.length) ui.ok(`Credentials supplied in the dashboard: ${arrived.join(', ')}`)
+        }
+      }
+      waitingFor = requested.size
+        ? `Still waiting for ${[...requested].join(', ')} — keep reading them from the environment, and work on what does not need them.`
+        : ''
       if (changed.config) {
         cfg = effectiveConfig((await fetchConfig(project)).config)
         budget.setCaps(cfg.budgetPerRunUsd, cfg.budgetPerDayUsd)
@@ -402,6 +422,9 @@ export async function runCommand(
         '',
         'Follow the engineering conventions (ARCHITECTURE.md). They are the standing',
         'contract and override your own defaults.',
+        '',
+        SECRET_INSTRUCTION,
+        waitingFor,
         plan ? `\nA planning step proposed this approach:\n${plan}` : '',
         lastFailure,
         verifyNotes,
@@ -412,6 +435,16 @@ export async function runCommand(
       const built = await builder.backend.build({ ...request(prompt), spec: builder.spec })
       appendFileSync(runLog, built.output)
       charge(builder, 'build', built)
+
+      // Forward any credential the agent asked for; the work carries on.
+      for (const ask of parseSecretRequests(notesSince(cwd, notesStart))) {
+        if (requested.has(ask.name) || process.env[ask.name]) continue
+        requested.add(ask.name)
+        const status = await requestSecret({ project, name: ask.name, reason: ask.reason, runId: report.runId })
+        if (status === 'available') ui.info(`${ask.name} exists in the dashboard; it arrives with the next refresh.`)
+        else if (status === 'pending') ui.warn(`The agent needs ${ask.name} (${ask.reason}) — answer it under Requests in the dashboard.`)
+        else ui.warn(`The agent needs ${ask.name} (${ask.reason}). Set it in the environment and run again.`)
+      }
 
       if (built.limited) {
         // Half an edit is worse than none.
@@ -449,6 +482,7 @@ export async function runCommand(
       channel.log(gate.output)
       if (gate.ranTiers.length) {
         gateTiers = gate.ranTiers
+        report.gateTiers = gate.ranTiers
         ui.dim(`tiers: ${gate.ranTiers.join(' → ')} · ${budget.summary()}`)
       }
 

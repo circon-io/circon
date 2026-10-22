@@ -266,6 +266,21 @@ describe('the loop', () => {
     assert.equal(process.env['CLOUDFLARE_API_TOKEN'], before)
   })
 
+  test('a credential the agent asks for is forwarded once, and the work goes on', async () => {
+    prd(['add checkout', 'add receipts'])
+    const prompts: string[] = []
+    const { backend: b } = backend('claude-code', (req) => {
+      prompts.push(req.prompt)
+      appendFileSync(join(req.cwd, 'progress.txt'), 'NEEDS-SECRET: STRIPE_SECRET_KEY — checkout\n')
+      return doesTheTask(req)
+    })
+    const code = await runCommand(2, { config: { agents: { build: { backend: 'claude-code' } } } }, deps(b).d)
+    assert.equal(code, 0)
+    assert.match(prompts[0] ?? '', /NEEDS-SECRET: NAME_IN_UPPER_CASE/)
+    assert.match(prompts[1] ?? '', /Still waiting for STRIPE_SECRET_KEY/)
+    assert.equal(subjects().filter((s) => s.startsWith('feat:')).length, 2)
+  })
+
   test('refuses to start when the build backend cannot run', async () => {
     prd(['add a cart'])
     const { backend: b } = backend('claude-code', doesTheTask)

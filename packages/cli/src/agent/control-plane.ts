@@ -179,6 +179,26 @@ export async function jobSecrets(jobId: string): Promise<Record<string, string> 
   return data?.secrets ?? null
 }
 
+/**
+ * Forward a credential the agent asked for. `available` means the dashboard
+ * already holds it and the runner should refetch; null means unreachable or
+ * unenrolled.
+ */
+export async function requestSecret(input: {
+  project: string
+  name: string
+  reason: string
+  runId: string
+}): Promise<'pending' | 'available' | null> {
+  const enrollment = readEnrollment()
+  if (!enrollment) return null
+  const data = (await request(enrollment, '/api/runner/requests', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })) as { status?: 'pending' | 'available' } | null
+  return data?.status ?? null
+}
+
 export interface RunRecord {
   runId: string
   projectSlug: string
@@ -194,6 +214,8 @@ export interface RunRecord {
   agents?: Record<string, { backend: string; model?: string }>
   /** Committed screenshots, as URLs into the run's branch. */
   screenshots?: string[]
+  /** The feedback loops (gate tiers) the run exercised. */
+  gateTiers?: string[]
 }
 
 export async function reportRun(record: RunRecord): Promise<boolean> {
