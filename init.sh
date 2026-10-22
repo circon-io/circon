@@ -73,7 +73,7 @@ cat <<'NEXT'
 ──────────────────────────────────────────────────────────────────────────
 Bootstrap complete. Two commands to a working machine:
 
-  circon config     Anthropic key, Telegram bot, conventions repository
+  circon config     agent credentials, conventions repository
   circon setup      install everything missing (~30 min on a fresh box)
 
 Then, any time:

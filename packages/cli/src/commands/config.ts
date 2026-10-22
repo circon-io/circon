@@ -20,31 +20,12 @@ export async function configCommand(): Promise<number> {
     ui.dim(`Credentials are written to ${paths.config} at mode 0600.`)
 
     const anthropic = readEnvFile('anthropic')
-    const telegram = readEnvFile('telegram')
     const cfg = readConfig()
 
     ui.blank()
     ui.info('Anthropic (architect model and the review pass)')
     const key = await ask(rl, 'API key', anthropic['ANTHROPIC_API_KEY'])
     if (key) writeEnvFile('anthropic', { ANTHROPIC_API_KEY: key }, 'Anthropic credentials')
-
-    ui.blank()
-    ui.info('Telegram (notifications and remote control) — Enter to skip')
-    const token = await ask(rl, 'Bot token', telegram['TELEGRAM_BOT_TOKEN'])
-    const chat = token ? await ask(rl, 'Chat ID', telegram['TELEGRAM_CHAT_ID']) : ''
-    if (token && chat) {
-      // Validate now, so a typo surfaces here rather than as three days of silence.
-      let valid = false
-      try {
-        const res = await fetch(`https://api.telegram.org/bot${token}/getMe`, {
-          signal: AbortSignal.timeout(10_000),
-        })
-        valid = res.ok
-      } catch { valid = false }
-      writeEnvFile('telegram', { TELEGRAM_BOT_TOKEN: token, TELEGRAM_CHAT_ID: chat }, 'Telegram credentials')
-      if (valid) ui.ok('Telegram token accepted.')
-      else ui.warn('Telegram rejected that token — saved anyway, fix it and re-run.')
-    }
 
     ui.blank()
     ui.info('Project credentials — used by scaffolded projects, Enter to skip')
