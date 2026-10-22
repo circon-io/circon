@@ -1,0 +1,5 @@
+# Accessibility labels that must be present in the running app.
+# The first task builds these; the agent appends more as it adds elements.
+Shopping list
+New item
+Add item
