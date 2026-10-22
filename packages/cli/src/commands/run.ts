@@ -6,6 +6,7 @@ import { ui } from '../core/ui.ts'
 import { paths, projectPaths } from '../core/paths.ts'
 import { readConfig } from '../core/config.ts'
 import { runGate } from '../agent/gate.ts'
+import { AndroidEmulator } from '../agent/emulator.ts'
 import { Repo } from '../agent/git.ts'
 import { acquireLock, releaseLock, stopRequested, clearStop } from '../agent/lock.ts'
 import { runVerification } from '../agent/verify.ts'
@@ -78,6 +79,18 @@ export async function runCommand(maxLoops = 20, opts: RunOptions = {}): Promise<
   // left at 'running' is worse than one marked failed, because nothing ever
   // clears it. Null until the run actually starts.
   let report: RunRecord | null = null
+  // Booted on the android tier's first need, and always shut down below.
+  const emulator = new AndroidEmulator()
+  let emulatorWarned = false
+  const ensureAndroidDevice = async (): Promise<boolean> => {
+    const device = await emulator.ensure()
+    if (device.started) ui.dim('android: booted the emulator for the gate')
+    if (!device.ok && !emulatorWarned) {
+      emulatorWarned = true
+      ui.warn(`android UI tier skipped: ${device.reason ?? 'no device'}`)
+    }
+    return device.ok
+  }
 
   try {
     const aider = await which('aider')
@@ -224,7 +237,7 @@ export async function runCommand(maxLoops = 20, opts: RunOptions = {}): Promise<
       if (cost !== null) budget.add('aider', cost)
 
       ui.step('Running the quality gate…')
-      const gate = await runGate({ cwd })
+      const gate = await runGate({ cwd, ensureAndroidDevice })
       appendFileSync(runLog, gate.output)
       if (gate.ranTiers.length) {
         gateTiers = gate.ranTiers
@@ -370,6 +383,7 @@ export async function runCommand(maxLoops = 20, opts: RunOptions = {}): Promise<
 
     return 0
   } finally {
+    await emulator.release()
     if (report) {
       // No outcome means something threw. Recording that is the point.
       report.outcome ??= 'aborted'

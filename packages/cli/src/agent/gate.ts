@@ -30,6 +30,11 @@ export interface GateDeps {
   hasBinary?: (name: string) => Promise<boolean>
   fileExists?: (path: string) => boolean
   readFile?: (path: string) => string
+  /**
+   * Provide an android device when the tier needs one, booting it if necessary.
+   * Without it the tier runs only when a device is already attached.
+   */
+  ensureAndroidDevice?: () => Promise<boolean>
 }
 
 interface Tier {
@@ -89,6 +94,12 @@ export async function runGate(deps: GateDeps): Promise<GateResult> {
       name: 'android UI',
       applies: async () => {
         if (!fileExists(flow('android.sh')) || !(await hasBinary('agent-device'))) return false
+        if (deps.ensureAndroidDevice) {
+          // Booting an emulator takes minutes, so only for a flow that will
+          // actually use it; android.sh skips itself without these two files.
+          if (!fileExists(projectPaths.androidAppId) || !fileExists(projectPaths.expectedAndroid)) return false
+          return deps.ensureAndroidDevice()
+        }
         const devices = await exec('adb', ['devices'], cwd)
         return /\bdevice\s*$/m.test(devices.output)
       },

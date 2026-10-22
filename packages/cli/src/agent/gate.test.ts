@@ -184,3 +184,34 @@ describe('UI tiers', () => {
     assert.ok(!h.calls.some((c) => c.includes('android.sh')))
   })
 })
+
+describe('android device provisioning', () => {
+  const configured = {
+    '.circon/flows/android.sh': '',
+    '.circon/android-app-id': 'com.example.app',
+    '.circon/expected-android.txt': 'Sign in',
+  }
+
+  test('asks for a device and runs the flow once it has one', async () => {
+    let asked = 0
+    const h = harness({ files: configured, binaries: ['agent-device'] })
+    const r = await runGate({ ...h, ensureAndroidDevice: async () => { asked++; return true } })
+    assert.equal(asked, 1)
+    assert.deepEqual(r.ranTiers, ['android UI'])
+  })
+
+  test('does not boot an emulator for a flow that would skip itself', async () => {
+    let asked = 0
+    const h = harness({ files: { '.circon/flows/android.sh': '' }, binaries: ['agent-device'] })
+    const r = await runGate({ ...h, ensureAndroidDevice: async () => { asked++; return true } })
+    assert.equal(asked, 0)
+    assert.deepEqual(r.ranTiers, [])
+  })
+
+  test('skips the tier when no device could be provided', async () => {
+    const h = harness({ files: configured, binaries: ['agent-device'] })
+    const r = await runGate({ ...h, ensureAndroidDevice: async () => false })
+    assert.deepEqual(r.ranTiers, [])
+    assert.equal(r.ok, true)
+  })
+})
