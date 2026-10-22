@@ -234,6 +234,22 @@ describe('the loop', () => {
     assert.ok(log.includes('feat: add a wishlist'), 'the task added mid-run was built')
   })
 
+  test('preparation is committed on the run branch before the first task', async () => {
+    prd(['add a cart'])
+    const { backend: b } = backend('claude-code', doesTheTask)
+    await runCommand(1, {
+      config: { agents: { build: { backend: 'claude-code' } } },
+      prepare: async (cwd) => {
+        writeFileSync(join(cwd, 'scaffolded.txt'), 'template')
+        return true
+      },
+    }, deps(b).d)
+    const log = subjects()
+    assert.ok(log.indexOf('chore: scaffold from the circon template') > log.indexOf('feat: add a cart'), 'scaffold comes first')
+    assert.equal(git('show', 'main:PRD.md').includes('add a cart'), true)
+    assert.ok(!git('ls-tree', '--name-only', 'main').includes('scaffolded.txt'), 'main is untouched; the PR carries it')
+  })
+
   test('refuses to start when the build backend cannot run', async () => {
     prd(['add a cart'])
     const { backend: b } = backend('claude-code', doesTheTask)

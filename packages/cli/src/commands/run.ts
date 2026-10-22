@@ -62,6 +62,11 @@ export interface RunOptions {
   /** Where progress and output go besides the terminal: the dashboard, for a dispatched run. */
   channel?: RunChannel
   refresh?: RefreshSignals
+  /**
+   * Runs on the fresh run branch before the first iteration; whatever it changes
+   * is committed there. A job uses it to scaffold a repository on its first run.
+   */
+  prepare?: (cwd: string) => Promise<boolean>
 }
 
 /** Everything the loop decides with, injectable so the loop itself is testable. */
@@ -212,6 +217,11 @@ export async function runCommand(
     } catch (err) {
       ui.error(err instanceof Error ? err.message : String(err))
       return 1
+    }
+
+    if (opts.prepare && (await opts.prepare(cwd))) {
+      await repo.stageAll()
+      if (await repo.hasStagedChanges()) await repo.commit('chore: scaffold from the circon template')
     }
 
     mkdirSync(paths.logs, { recursive: true })

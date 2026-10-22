@@ -8,6 +8,7 @@ import { readLock } from '../agent/lock.ts'
 import { runCommand, type RunOptions } from './run.ts'
 import { resolve as resolveConventions } from '../core/conventions.ts'
 import { cliVersion } from './update.ts'
+import { scaffoldIfMissing } from './init.ts'
 import { cloneCredential } from '../agent/control-plane.ts'
 import {
   configureCredentialHelper, credentialFlags, slugToHttps,
@@ -157,7 +158,12 @@ export async function jobCommand(slug: string | undefined, opts: JobOptions = {}
   const previous = process.cwd()
   try {
     process.chdir(dir)
-    return await runCommand(maxLoops ?? 20, runOptions)
+    return await runCommand(maxLoops ?? 20, {
+      ...runOptions,
+      // A repository connected in the dashboard holds only the approved PRD at
+      // first; its first run lays down the template, in the same PR as the work.
+      prepare: (cwd) => scaffoldIfMissing(cwd, slug),
+    })
   } finally {
     process.chdir(previous)
   }

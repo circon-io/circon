@@ -21,6 +21,7 @@ Machine
 
 Projects
   circon init [name]               scaffold a monorepo wired to the gate
+       --here                      scaffold into the current checkout instead
   circon run [maxLoops]            run the agent loop in the current project
   circon job <org>__<repo> [n]     clone or update a project, then run it
   circon status                    tasks done and open in this project
@@ -88,7 +89,7 @@ async function main(argv: string[]): Promise<number> {
 
     case 'init': {
       const { initCommand } = await import('./commands/init.ts')
-      return initCommand(rest[0])
+      return initCommand(rest)
     }
 
     case 'enroll': {
