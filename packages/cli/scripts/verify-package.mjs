@@ -21,6 +21,10 @@ const REQUIRED = [
   'templates/.github/workflows/ci.yml',
   'templates/.github/workflows/deploy.yml',
   'templates/SECRETS.md',
+  'templates/CLAUDE.md',
+  'templates/.env.example',
+  // Not `.gitignore`: npm drops that name from every tarball, so init renames it.
+  'templates/gitignore',
   'templates/packages/shared/src/index.ts',
   'templates/packages/i18n/src/index.ts',
   'templates/services/api/src/index.ts',
@@ -44,7 +48,7 @@ function extractFiles(parsed) {
   const entries = Array.isArray(parsed) ? parsed : Object.values(parsed)
   const first = entries[0]
   if (!first || !Array.isArray(first.files)) {
-    throw new Error('unrecognised `npm pack --json` output shape')
+    throw new Error('unrecognized `npm pack --json` output shape')
   }
   return first.files.map((f) => f.path)
 }

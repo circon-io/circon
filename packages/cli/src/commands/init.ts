@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, writeFileSync, cpSync, chmodSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, writeFileSync, cpSync, chmodSync, readFileSync, renameSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createInterface } from 'node:readline/promises'
@@ -52,6 +52,11 @@ export async function initCommand(nameArg?: string): Promise<number> {
 
   mkdirSync(target, { recursive: true })
   cpSync(templates, target, { recursive: true })
+
+  // npm strips every `.gitignore` from a published tarball, so the template
+  // ships it under a name npm leaves alone and it is restored here.
+  const shippedIgnore = join(target, 'gitignore')
+  if (existsSync(shippedIgnore)) renameSync(shippedIgnore, join(target, '.gitignore'))
 
   // Name the workspace root after the project.
   const pkgPath = join(target, 'package.json')
