@@ -1,6 +1,23 @@
-import { test, describe } from 'node:test'
+import { test, describe, before, after } from 'node:test'
 import assert from 'node:assert/strict'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 import { parseAiderCost, parseClaudeCost, RunBudget, usd } from './spend.ts'
+
+// RunBudget.add writes the spend ledger. Point it at a scratch home, or every
+// test run would charge the real machine's daily cap.
+let home = ''
+const previousHome = process.env['CIRCON_HOME']
+before(() => {
+  home = mkdtempSync(join(tmpdir(), 'circon-spend-'))
+  process.env['CIRCON_HOME'] = home
+})
+after(() => {
+  if (previousHome === undefined) delete process.env['CIRCON_HOME']
+  else process.env['CIRCON_HOME'] = previousHome
+  rmSync(home, { recursive: true, force: true })
+})
 
 describe('parsing aider cost', () => {
   test('reads the session total from the real output shape', () => {
