@@ -17,6 +17,8 @@ export interface Env {
   /** GitHub App: id and slug are public, the private key is not. */
   GH_APP_ID?: string
   GH_APP_SLUG?: string
+  /** The App's OAuth client id, for proving who completed an install. */
+  GH_CLIENT_ID?: string
 
   // secrets, set by the deploy workflow
   CLERK_SECRET_KEY?: string
@@ -25,6 +27,7 @@ export interface Env {
   STRIPE_WEBHOOK_SECRET?: string
   GH_APP_PRIVATE_KEY?: string
   GH_WEBHOOK_SECRET?: string
+  GH_CLIENT_SECRET?: string
 }
 
 export function json(body: unknown, status = 200): Response {

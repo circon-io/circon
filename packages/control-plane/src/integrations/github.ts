@@ -205,6 +205,23 @@ export async function createPullRequest(
   return body.html_url ?? null
 }
 
+/** The account an installation is on, for display. Uses the App JWT. */
+export async function getInstallation(
+  env: Env,
+  installationId: string,
+): Promise<{ login?: string; type?: string } | null> {
+  const res = await fetch(`${API}/app/installations/${installationId}`, {
+    headers: {
+      authorization: `Bearer ${await appJwt(env)}`,
+      accept: 'application/vnd.github+json',
+      'user-agent': UA,
+    },
+  })
+  if (!res.ok) return null
+  const body = (await res.json()) as { account?: { login?: string; type?: string } }
+  return body.account ?? null
+}
+
 // --- webhooks ---------------------------------------------------------------
 
 /**

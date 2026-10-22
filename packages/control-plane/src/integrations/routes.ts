@@ -2,8 +2,9 @@ import { type Env, fail, ok, json, id, nowIso } from '../env.ts'
 import type { Principal } from '../auth.ts'
 import { canAddIntegration, canAddProject } from '../billing/entitlements.ts'
 import {
-  createPullRequest, installUrl, installationToken, listRepositories, verifyWebhook,
+  createPullRequest, getInstallation, installUrl, installationToken, listRepositories, verifyWebhook,
 } from './github.ts'
+import { signState, verifyState, userCanAccessInstallation } from './install.ts'
 
 /**
  * Connecting GitHub, and turning a repository into a project.
@@ -55,13 +56,13 @@ function limitResponse(decision: Awaited<ReturnType<typeof canAddProject>>): Res
 }
 
 /** Where to send the browser to install the App. */
-export function githubInstallUrl(env: Env, principal: Principal): Response {
+export async function githubInstallUrl(env: Env, principal: Principal): Promise<Response> {
   if (!env.GH_APP_SLUG) {
     return fail('not_configured', 'GH_APP_SLUG is not set on the API Worker.', 503)
   }
-  // `state` carries the org through the redirect, so the callback knows who
-  // installed it without trusting anything the browser sends back.
-  return ok({ url: installUrl(env, principal.org) })
+  // `state` carries the org through the redirect, signed, so the callback can
+  // trust it came from us. See install.ts for why that alone is not enough.
+  return ok({ url: installUrl(env, await signState(env, principal.org)) })
 }
 
 export async function listIntegrations(env: Env, org: string): Promise<Response> {
@@ -318,18 +319,8 @@ export async function githubWebhook(request: Request, env: Env): Promise<Respons
   if (!installationId) return ok({ ignored: type })
 
   switch (`${type}.${event.action ?? ''}`) {
-    case 'installation.created': {
-      // The org comes from `state`, which we set on the install URL. Without it
-      // the installation cannot be attributed, so it waits for the callback.
-      const org = typeof event.state === 'string' ? event.state : null
-      if (!org) return ok({ pending: 'awaiting callback to attribute the installation' })
-
-      const allowance = await canAddIntegration(env, org)
-      if (!allowance.allowed) return limitResponse(allowance)
-
-      await upsertIntegration(env, org, installationId, event.installation?.account)
-      break
-    }
+    // installation.created is deliberately not handled: a webhook cannot say
+    // which org started the install. The signed, OAuth-verified callback does.
 
     case 'installation.deleted':
     case 'installation.suspend': {
@@ -363,6 +354,25 @@ export async function githubWebhook(request: Request, env: Env): Promise<Respons
       break
     }
 
+    case 'installation_repositories.added': {
+      // A repo deselected earlier and selected again comes back to life, as long
+      // as its integration is still live.
+      const added = (JSON.parse(raw) as {
+        repositories_added?: Array<{ id: number }>
+      }).repositories_added ?? []
+      for (const repo of added) {
+        await env.DB.prepare(
+          `UPDATE projects SET status = 'active'
+           WHERE external_id = ?1 AND integration_id IN (
+             SELECT id FROM integrations WHERE external_id = ?2 AND revoked_at IS NULL
+           )`,
+        )
+          .bind(String(repo.id), installationId)
+          .run()
+      }
+      break
+    }
+
     case 'installation_repositories.removed': {
       // A repo was deselected: its project can no longer be cloned.
       const removed = (JSON.parse(raw) as {
@@ -385,19 +395,37 @@ export async function githubWebhook(request: Request, env: Env): Promise<Respons
   return ok({ received: `${type}.${event.action ?? ''}` })
 }
 
-async function upsertIntegration(
+/**
+ * Record an installation for an org.
+ *
+ * Never moves a live installation from one org to another. Even with the OAuth
+ * check, a user with access to an installation could otherwise detach it from
+ * the org that connected it first, and that org's projects would stop working
+ * without anyone there having done anything.
+ */
+export async function upsertIntegration(
   env: Env,
   org: string,
   installationId: string,
-  account?: { login?: string; type?: string },
-): Promise<void> {
+  account?: { login?: string | undefined; type?: string | undefined },
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  const existing = await env.DB.prepare(
+    `SELECT org, revoked_at FROM integrations WHERE provider = 'github' AND external_id = ?1`,
+  )
+    .bind(installationId)
+    .first<{ org: string; revoked_at: string | null }>()
+  if (existing && existing.org !== org && !existing.revoked_at) {
+    return { ok: false, reason: 'That installation is already connected to another organization.' }
+  }
+
   await env.DB.prepare(
     `INSERT INTO integrations
        (id, org, provider, external_id, account_login, account_type, created_at)
      VALUES (?1, ?2, 'github', ?3, ?4, ?5, ?6)
      ON CONFLICT (provider, external_id) DO UPDATE SET
        org = excluded.org,
-       account_login = excluded.account_login,
+       account_login = COALESCE(excluded.account_login, integrations.account_login),
+       account_type = COALESCE(excluded.account_type, integrations.account_type),
        revoked_at = NULL`,
   )
     .bind(
@@ -405,29 +433,51 @@ async function upsertIntegration(
       account?.login ?? null, account?.type ?? null, nowIso(),
     )
     .run()
+  return { ok: true }
+}
+
+function backToDashboard(env: Env, outcome: string): Response {
+  const to = env.DASHBOARD_ORIGIN || '/'
+  return new Response(null, { status: 302, headers: { location: `${to}?github=${encodeURIComponent(outcome)}` } })
 }
 
 /**
  * The redirect GitHub sends the user back to after installing.
  *
- * This is what attributes an installation to an org: `state` is the org we put
- * on the install URL, and `installation_id` is what GitHub appends.
+ * This is what attributes an installation to an org, so it trusts nothing in
+ * the URL on its own: the org comes from a signed `state`, and the user's
+ * access to `installation_id` is proven with the OAuth `code` (install.ts).
  */
-export async function githubCallback(request: Request, env: Env): Promise<Response> {
+export async function githubCallback(
+  request: Request,
+  env: Env,
+  fetchImpl: typeof fetch = fetch,
+): Promise<Response> {
   const url = new URL(request.url)
   const installationId = url.searchParams.get('installation_id')
-  const org = url.searchParams.get('state')
+  const state = url.searchParams.get('state')
+  const code = url.searchParams.get('code')
 
-  if (!installationId || !org) {
-    return fail('invalid_callback', 'Missing installation_id or state.')
+  // A repository-selection change made on github.com arrives with no state. The
+  // webhook already applied it; just send the user home.
+  if (url.searchParams.get('setup_action') === 'update' && !state) return backToDashboard(env, 'updated')
+
+  if (!installationId || !/^\d+$/.test(installationId) || !state || !code) {
+    return fail('invalid_callback', 'Missing installation_id, state or code.')
   }
+
+  const org = await verifyState(env, state)
+  if (!org) return fail('invalid_state', 'The install link expired or was not issued by circon. Start again.', 400)
+
+  const access = await userCanAccessInstallation(env, code, installationId, fetchImpl)
+  if (!access.ok) return fail('installation_not_yours', access.reason, 403)
 
   const allowance = await canAddIntegration(env, org)
   if (!allowance.allowed) return limitResponse(allowance)
 
-  await upsertIntegration(env, org, installationId)
+  const account = await getInstallation(env, installationId).catch(() => null)
+  const recorded = await upsertIntegration(env, org, installationId, account ?? undefined)
+  if (!recorded.ok) return fail('installation_taken', recorded.reason, 409)
 
-  // Straight back to the dashboard; it will now list the integration.
-  const to = env.DASHBOARD_ORIGIN || '/'
-  return new Response(null, { status: 302, headers: { location: `${to}?connected=github` } })
+  return backToDashboard(env, 'connected')
 }

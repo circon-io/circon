@@ -23,6 +23,7 @@ the dashboard to provide one.
 | `STRIPE_WEBHOOK_SECRET` | Created in step 5 below (`whsec_…`) |
 | `GH_APP_PRIVATE_KEY` | Created in step 6 below. Paste the whole PEM including the BEGIN/END lines. **Must be PKCS#8** — see step 6. |
 | `GH_WEBHOOK_SECRET` | Generate yourself: `openssl rand -hex 32`. Also entered in the App's settings. |
+| `GH_CLIENT_SECRET` | The App's page → **Generate a new client secret** (step 6). Proves who completed an install. |
 
 `GITHUB_TOKEN` is injected automatically. **Do not create one.**
 
@@ -58,6 +59,7 @@ keys and account ids belong here, not in secrets, so they can be diffed.
 | `STRIPE_PRICE_PRO` | The Pro price id from step 5 (`price_…`) |
 | `GH_APP_ID` | The numeric App ID from step 6 |
 | `GH_APP_SLUG` | The App's URL slug from step 6, e.g. `circon`. Builds the install link. |
+| `GH_CLIENT_ID` | The App's **Client ID** from step 6 (`Iv1.…`). Public. |
 | `CONTROL_PLANE_DOMAIN` | Hostname for the API Worker, e.g. `api.circon.io`. Zone must be on Cloudflare. |
 | `DASHBOARD_DOMAIN` | Hostname for the dashboard, e.g. `app.circon.io` |
 | `CONTROL_PLANE_URL` | `https://<CONTROL_PLANE_DOMAIN>` |
@@ -133,10 +135,19 @@ something to do to a live App with other people's installations on it.
 | Name | `circon`. Its slug goes in `GH_APP_SLUG` — see below. |
 | Homepage URL | `<DASHBOARD_ORIGIN>` |
 | Callback URL | `<CONTROL_PLANE_URL>/api/integrations/github/callback` |
-| Request user authorization on install | off |
+| Request user authorization (OAuth) during installation | **on** |
 | Webhook URL | `<CONTROL_PLANE_URL>/api/webhooks/github` |
 | Webhook secret | The `GH_WEBHOOK_SECRET` you generated |
 | Where can this GitHub App be installed | **Any account** |
+
+**Request user authorization during installation must be on.** The callback
+is a public URL anyone can call with any `installation_id`. With this setting,
+GitHub adds a one-time `code` to the redirect, and the control plane exchanges it
+for the installing user's token. It then refuses the install unless that user
+can actually see the installation. Without this, a signed `state` from your own
+org plus *someone else's* installation id would hand you tokens for their
+repositories. That is why the callback refuses every install while
+`GH_CLIENT_ID`/`GH_CLIENT_SECRET` are unset.
 
 **Any account** is the one field to get right first time. "Only on this account"
 limits installs to `circon-io`'s own repositories, so Connect GitHub works for you
@@ -171,7 +182,9 @@ uninstall or a repository being deselected. Nothing else is read.
 
 Then, on the App's page:
 
-1. Copy the **App ID** into the `GH_APP_ID` variable.
+1. Copy the **App ID** into the `GH_APP_ID` variable, and the **Client ID** into
+   `GH_CLIENT_ID`. **Generate a new client secret** and store it as
+   `GH_CLIENT_SECRET`.
 2. **Generate a private key** and download the `.pem`.
 3. **Convert it.** GitHub issues PKCS#1 (`BEGIN RSA PRIVATE KEY`); WebCrypto in
    Workers only imports PKCS#8. The API detects this and says so, but convert it
@@ -279,18 +292,19 @@ rather than reaching for the template.
 
 ```
 [ ] GitHub environment `production` with required reviewers
-[ ] 7 secrets  (CLOUDFLARE_API_TOKEN, CLERK_SECRET_KEY, RUNNER_SECRET_PEPPER,
+[ ] 8 secrets  (CLOUDFLARE_API_TOKEN, CLERK_SECRET_KEY, RUNNER_SECRET_PEPPER,
                 STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET,
-                GH_APP_PRIVATE_KEY, GH_WEBHOOK_SECRET)
-[ ] 11 variables (CLOUDFLARE_ACCOUNT_ID, CLERK_JWKS_URL, CLERK_ISSUER,
+                GH_APP_PRIVATE_KEY, GH_WEBHOOK_SECRET, GH_CLIENT_SECRET)
+[ ] 12 variables (CLOUDFLARE_ACCOUNT_ID, CLERK_JWKS_URL, CLERK_ISSUER,
                   NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY, STRIPE_PRICE_PRO,
-                  GH_APP_ID, GH_APP_SLUG,
+                  GH_APP_ID, GH_APP_SLUG, GH_CLIENT_ID,
                   CONTROL_PLANE_DOMAIN, DASHBOARD_DOMAIN,
                   CONTROL_PLANE_URL, DASHBOARD_ORIGIN)
 [ ] Zone on Cloudflare, token has zone-level Workers Routes/DNS/Zone perms
 [ ] workers.dev subdomain registered on the account (required even when unused)
 [ ] Workflow permissions: read/write + allow PR creation
-[ ] GitHub App: created, PKCS#8 key, webhook secret matching
+[ ] GitHub App: created, PKCS#8 key, webhook secret matching,
+    user authorization during installation ON, client id + secret set
 [ ] Stripe product, price, webhook endpoint
 [ ] npm: manual first publish, then trusted publisher
 [ ] Clerk: organizations enabled
