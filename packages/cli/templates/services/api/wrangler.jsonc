@@ -1,10 +1,24 @@
 {
-  "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "app-api",
-  "main": "src/index.ts",
+  // Cloudflare is the default host; src/adapters/ has the others. Everything
+  // Cloudflare-specific lives in this file and src/adapters/cloudflare.ts.
+  "name": "__PROJECT_NAME__-api",
+  "main": "src/adapters/cloudflare.ts",
   "compatibility_date": "2026-01-01",
   "compatibility_flags": ["nodejs_compat"],
-  "observability": { "enabled": true }
-  // Secrets are set with `wrangler secret put`, never committed here.
-  // Bindings (D1, KV, R2) go in this file once they exist.
+  "observability": { "enabled": true },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "__PROJECT_NAME__",
+      // Filled in by the deploy workflow, which creates the database on first
+      // deploy. Any value works for `wrangler dev`, which keeps a local copy.
+      "database_id": "local",
+      "migrations_dir": "drizzle"
+    }
+  ],
+  "vars": {
+    "CLERK_JWKS_URL": "",
+    "CLERK_ISSUER": ""
+  }
+  // Secrets (wrangler secret put): CLERK_WEBHOOK_SECRET
 }

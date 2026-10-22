@@ -1,0 +1,66 @@
+name: Release
+
+# Two approval gates. Gate 1 is merging a change's PR. Gate 2 is merging the
+# "version packages" PR this workflow keeps open — directly, or by approving
+# the release report in the circon dashboard, which merges it. Only then does
+# anything reach users.
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  check:
+    uses: ./.github/workflows/ci.yml
+
+  version:
+    needs: check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write        # the version commit and tags
+      pull-requests: write   # the version PR
+    outputs:
+      published: ${{ steps.changesets.outputs.published }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # While changesets are pending: open or update the version PR. Once it
+      # merges: tag the new versions, which is what marks a release.
+      - id: changesets
+        uses: changesets/action@v1
+        with:
+          version: pnpm changeset version
+          publish: pnpm changeset tag
+          commit: "chore: version packages"
+          title: "chore: version packages"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  deploy:
+    needs: version
+    if: needs.version.outputs.published == 'true'
+    uses: ./.github/workflows/deploy.yml
+    secrets: inherit
+
+  mobile:
+    needs: version
+    if: needs.version.outputs.published == 'true' && vars.CODEMAGIC_APP_ID != ''
+    runs-on: ubuntu-latest
+    steps:
+      # Mobile builds need macOS, so Codemagic does them; this only starts one.
+      - name: Start the store release on Codemagic
+        run: |
+          curl -fsS -X POST https://api.codemagic.io/builds \
+            -H "x-auth-token: ${{ secrets.CODEMAGIC_API_TOKEN }}" \
+            -H 'Content-Type: application/json' \
+            -d '{"appId":"${{ vars.CODEMAGIC_APP_ID }}","workflowId":"release","branch":"main"}'

@@ -1,4 +1,6 @@
 {
+  // The base every package extends. apps/mobile extends Expo's instead, which
+  // knows about React Native's module resolution.
   "compilerOptions": {
     "target": "es2023",
     "lib": ["es2023", "dom"],
@@ -10,7 +12,8 @@
     "allowImportingTsExtensions": true,
     "noEmit": true,
     "skipLibCheck": true,
+    "types": ["node"],
     "jsx": "react-jsx"
   },
-  "include": ["apps/**/*", "services/**/*", "packages/**/*"]
+  "files": []
 }

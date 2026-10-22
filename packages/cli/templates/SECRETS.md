@@ -1,47 +1,52 @@
-# Repository secrets and variables
+# Secrets, variables and settings
 
-What this project's GitHub Actions need, and where each value goes.
+What this project's pipelines need, and where each value goes. When the project
+is built by circon, the dashboard's project secrets cover the runner; these are
+for GitHub Actions and Codemagic.
 
-**Secrets** are encrypted and masked in logs. **Variables** are plain text and
-readable by anyone with repo access — publishable keys and account IDs belong
-there, not in secrets, so they can be seen and diffed.
+**Secrets** are encrypted and masked in logs. **Variables** are plain text,
+readable by anyone with repo access: publishable keys and account ids go there.
 
-## Environments
+## GitHub: protect `main` (gate 1)
 
-Create these under **Settings → Environments**:
+**Settings → Branches → Add rule for `main`**: require a pull request, and
+require the `CI / check` status. Merging a PR is then the statement "this code
+is correct", and nothing reaches `main` around the checks. circon's plan
+approvals open a PR when the branch is protected, which is the point.
 
-| Environment | Used by | Protection |
-|---|---|---|
-| `production` | `deploy.yml` | **Add required reviewers.** This is the release approval gate: the deploy pauses until someone approves. |
-| `preview` | optional, for PR deploys | none |
+## GitHub: environment `production`
 
-A GitHub Environment with required reviewers gives you approval-before-release
-natively — no dashboard required for it.
+**Settings → Environments → production**. Required reviewers are optional here:
+the release approval (gate 2) is merging the version PR, which the circon
+dashboard's release report does for you.
 
-## Secrets
-
-| Name | Scope | Where to get it |
-|---|---|---|
-| `CLOUDFLARE_API_TOKEN` | production | Cloudflare → My Profile → API Tokens. **Scope it to this project's account and only the resources it needs** — never a global key. |
-| `CLERK_SECRET_KEY` | production | Clerk dashboard → API Keys → Secret key |
-| `SENTRY_AUTH_TOKEN` | production | Sentry → Settings → Auth Tokens (`project:releases` is enough) |
-| `CODEMAGIC_API_TOKEN` | production | Codemagic → Teams → Integrations → API token |
-
-## Variables
-
-| Name | Value |
+| Secret | Where to get it |
 |---|---|
-| `CLOUDFLARE_ACCOUNT_ID` | Cloudflare dashboard → Workers → Account ID |
-| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Clerk → API Keys → Publishable key |
-| `NEXT_PUBLIC_SENTRY_DSN` | Sentry → Project Settings → Client Keys (DSN) |
-| `CODEMAGIC_APP_ID` | Codemagic → the app → its URL contains the id |
+| `CLOUDFLARE_API_TOKEN` | Cloudflare → My Profile → API Tokens. Scoped to this project's account: Workers Scripts, D1 and Pages edit. Never a global key. |
+| `CLERK_WEBHOOK_SECRET` | Clerk → Webhooks → add `<API_URL>/webhooks/clerk` → Signing secret (`whsec_…`) |
+| `CODEMAGIC_API_TOKEN` | Codemagic → Team settings → Integrations → Codemagic API |
+| `SENTRY_AUTH_TOKEN` | Sentry → Settings → Auth Tokens (`project:releases`) |
+
+| Variable | Value |
+|---|---|
+| `CLOUDFLARE_ACCOUNT_ID` | Cloudflare → Workers & Pages → Account ID |
+| `CLERK_JWKS_URL` | Clerk → API Keys → JWKS URL |
+| `CLERK_ISSUER` | Clerk → API Keys → Frontend API URL |
+| `EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY` | Clerk → API Keys → Publishable key |
+| `API_URL` | Where the API is served, e.g. `https://__PROJECT_NAME__-api.<you>.workers.dev` |
+| `APP_ORIGIN` | Where the web app is served, e.g. `https://__PROJECT_NAME__.pages.dev` |
+| `CODEMAGIC_APP_ID` | Codemagic → the app → the id in its URL |
+
+## Codemagic
+
+See the top of `codemagic.yaml`: an App Store Connect API key named `codemagic`,
+an Android keystore named `upload_keystore`, and the `app_env` and
+`google_play` variable groups. Register test-device UDIDs before building the
+dev client; a phone added later needs a new build.
 
 ## Local development
 
-Copy `.env.example` to `.env` and fill the same values. `.env` is gitignored;
-never commit it.
+Copy `.env.example` to `.env` for the app, and the API's values to
+`services/api/.dev.vars` for `wrangler dev`. Both are gitignored.
 
-## What is deliberately absent
-
-There is no `NPM_TOKEN`. Nothing here publishes to npm — and where publishing
-does happen, OIDC trusted publishing replaces the token entirely.
+There is no `NPM_TOKEN`: nothing here publishes to npm.

@@ -82,7 +82,8 @@ if [ -n "$API_DIR" ]; then
 fi
 
 echo "Starting Expo web from $CLIENT_DIR on port $PORT..."
-( cd "$CLIENT_DIR" && npx expo start --web --port "$PORT" ) > "$EXPO_LOG" 2>&1 &
+# The app must talk to the API started above, not whatever .env points at.
+( cd "$CLIENT_DIR" && EXPO_PUBLIC_API_URL="http://localhost:$API_PORT" npx expo start --web --port "$PORT" ) > "$EXPO_LOG" 2>&1 &
 EXPO_PID=$!
 
 # Wait for the dev server, but not forever

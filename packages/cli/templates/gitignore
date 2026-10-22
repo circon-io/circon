@@ -1,9 +1,21 @@
-node_modules/
-.expo/
-dist/
-build/
+node_modules
+dist
+build
 *.log
-.circon/*.log
-.circon/.last-verified
 .env
 .env.local
+.dev.vars
+
+# Expo
+.expo
+apps/mobile/expo-env.d.ts
+apps/mobile/src/uniwind-types.d.ts
+apps/mobile/android
+apps/mobile/ios
+
+# Cloudflare
+.wrangler
+
+# circon
+.circon/*.log
+.circon/.last-verified

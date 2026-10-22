@@ -1,0 +1,107 @@
+# Mobile builds run on Codemagic: iOS needs macOS, and one pipeline for both
+# stores beats two. Android dev builds run locally on the circon runner.
+#
+# Set up once in Codemagic (Team settings):
+#   - an App Store Connect API key integration named `codemagic`
+#   - an Android upload keystore with the reference name `upload_keystore`
+#   - environment variable groups:
+#       app_env      EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY, EXPO_PUBLIC_API_URL
+#       google_play  GCLOUD_SERVICE_ACCOUNT_CREDENTIALS
+#   - for ad-hoc builds, register test devices' UDIDs *before* building:
+#     a phone added later needs a new build.
+
+definitions:
+  install: &install
+    name: Install dependencies
+    script: |
+      corepack enable
+      pnpm install --frozen-lockfile
+  ios_ipa: &ios_ipa
+    name: Build the iOS IPA
+    script: |
+      xcode-project use-profiles
+      cd apps/mobile/ios
+      WORKSPACE="$(ls -d *.xcworkspace | head -1)"
+      xcode-project build-ipa --workspace "$WORKSPACE" --scheme "${WORKSPACE%.xcworkspace}"
+
+workflows:
+  # The dev client: a native shell that loads JS from Metro at runtime, so it is
+  # rebuilt only when native code or a native dependency changes. This is what
+  # the USB-iPhone gate tier installs.
+  dev-client:
+    name: iOS dev client (ad hoc)
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+    integrations:
+      app_store_connect: codemagic
+    environment:
+      node: 24
+      groups:
+        - app_env
+      ios_signing:
+        distribution_type: ad_hoc
+        bundle_identifier: __BUNDLE_ID__
+    scripts:
+      - *install
+      - name: Generate the iOS project with the dev client
+        script: |
+          cd apps/mobile
+          npx expo prebuild --platform ios --no-install
+          cd ios && pod install
+      - *ios_ipa
+    artifacts:
+      - apps/mobile/ios/build/ios/ipa/*.ipa
+
+  # Triggered by the release workflow once a release is approved.
+  release:
+    name: Store release (iOS + Android)
+    max_build_duration: 120
+    instance_type: mac_mini_m2
+    integrations:
+      app_store_connect: codemagic
+    environment:
+      node: 24
+      groups:
+        - app_env
+        - google_play
+      android_signing:
+        - upload_keystore
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: __BUNDLE_ID__
+    scripts:
+      - *install
+      - name: Generate native projects
+        script: |
+          cd apps/mobile
+          npx expo prebuild --no-install
+          cd ios && pod install
+      - name: Sign the Android release with the uploaded keystore
+        script: |
+          # Gradle merges a second android {} block into the generated one.
+          cat >> apps/mobile/android/app/build.gradle <<'GRADLE'
+          android {
+            signingConfigs {
+              upload {
+                storeFile file(System.getenv("CM_KEYSTORE_PATH"))
+                storePassword System.getenv("CM_KEYSTORE_PASSWORD")
+                keyAlias System.getenv("CM_KEY_ALIAS")
+                keyPassword System.getenv("CM_KEY_PASSWORD")
+              }
+            }
+            buildTypes { release { signingConfig signingConfigs.upload } }
+          }
+          GRADLE
+      - name: Build the Android app bundle
+        script: cd apps/mobile/android && ./gradlew bundleRelease
+      - *ios_ipa
+    artifacts:
+      - apps/mobile/android/app/build/outputs/**/*.aab
+      - apps/mobile/ios/build/ios/ipa/*.ipa
+    publishing:
+      google_play:
+        credentials: $GCLOUD_SERVICE_ACCOUNT_CREDENTIALS
+        track: internal
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true

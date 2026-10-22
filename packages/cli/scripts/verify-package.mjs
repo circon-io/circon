@@ -27,7 +27,16 @@ const REQUIRED = [
   'templates/gitignore',
   'templates/packages/shared/src/index.ts',
   'templates/packages/i18n/src/index.ts',
-  'templates/services/api/src/index.ts',
+  'templates/services/api/src/app.ts',
+  'templates/services/api/src/adapters/cloudflare.ts',
+  'templates/services/api/drizzle/0000_init.sql',
+  'templates/packages/domain/src/index.ts',
+  'templates/packages/ui/src/index.tsx',
+  'templates/apps/mobile/app/_layout.tsx',
+  'templates/apps/mobile/app/(admin)/_layout.tsx',
+  'templates/codemagic.yaml',
+  'templates/.changeset/config.json',
+  'templates/.github/workflows/release.yml',
 ]
 
 function readStdin() {

@@ -4,14 +4,29 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev --port ${PORT:-8787}",
+    "dev": "wrangler d1 migrations apply DB --local && wrangler dev --port ${PORT:-8787}",
     "deploy": "wrangler deploy",
-    "typecheck": "tsc --noEmit"
+    "start:node": "node --experimental-strip-types src/adapters/node.ts",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate:local": "wrangler d1 migrations apply DB --local",
+    "db:migrate": "wrangler d1 migrations apply DB --remote",
+    "typecheck": "tsc --noEmit -p .",
+    "test": "node --test 'src/**/*.test.ts'"
   },
   "dependencies": {
-    "@app/shared": "workspace:*"
+    "@app/domain": "workspace:*",
+    "@app/shared": "workspace:*",
+    "@hono/node-server": "^2.1.5",
+    "@libsql/client": "^0.18.0",
+    "drizzle-orm": "^0.45.4",
+    "hono": "^4.13.13",
+    "jose": "^6.2.13"
   },
   "devDependencies": {
-    "wrangler": "^4.0.0"
+    "@cloudflare/workers-types": "^5.20261001.0",
+    "@types/node": "^24.0.0",
+    "drizzle-kit": "^0.31.11",
+    "typescript": "~5.9.0",
+    "wrangler": "^4.152.0"
   }
 }

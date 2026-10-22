@@ -68,3 +68,6 @@ export function object<T extends Record<string, Validator<unknown>>>(
     return out as { [K in keyof T]: ReturnType<T[K]> }
   }
 }
+
+export * from './contract.ts'
+export { createApiClient, ApiClientError, type ApiClient, type ApiClientOptions } from './client.ts'

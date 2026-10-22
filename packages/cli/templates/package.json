@@ -1,15 +1,24 @@
 {
-  "name": "monorepo",
+  "name": "__PROJECT_NAME__",
   "private": true,
   "packageManager": "pnpm@10.34.5",
   "scripts": {
     "dev": "pnpm --parallel --recursive dev",
-    "build": "pnpm --recursive build",
+    "build": "pnpm --recursive --if-present build",
     "test": "pnpm --recursive --if-present test",
     "typecheck": "pnpm --recursive --if-present typecheck",
-    "deploy": "pnpm --filter ./services/api run deploy && pnpm --filter ./apps/web run deploy"
+    "deploy": "pnpm --filter @app/api run deploy",
+    "changeset": "changeset"
   },
   "devDependencies": {
-    "typescript": "^5.9.0"
+    "@changesets/cli": "^2.29.0",
+    "@types/node": "^24.0.0",
+    "typescript": "~5.9.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "workerd"
+    ]
   }
 }
