@@ -126,6 +126,8 @@ jobs:
                    "GitHub cannot be connected: the install callback refuses unverified installs."
           optional ANTHROPIC_API_KEY  "${{ secrets.ANTHROPIC_API_KEY }}" \
                    "plans cannot be generated from the dashboard."
+          optional SECRETS_MASTER_KEY "${{ secrets.SECRETS_MASTER_KEY }}" \
+                   "org and project secrets cannot be stored or handed to runners."
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}

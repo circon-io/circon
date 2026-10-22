@@ -5,6 +5,8 @@ import {
   createPullRequest, getInstallation, installUrl, installationToken, listRepositories, verifyWebhook,
 } from './github.ts'
 import { signState, verifyState, userCanAccessInstallation } from './install.ts'
+import { pullRequestEvent } from '../releases.ts'
+import { notifyRunners } from '../fleet.ts'
 
 /**
  * Connecting GitHub, and turning a repository into a project.
@@ -321,6 +323,13 @@ export async function githubWebhook(request: Request, env: Env): Promise<Respons
   const type = request.headers.get('x-github-event') ?? ''
   const installationId = event.installation?.id ? String(event.installation.id) : null
   if (!installationId) return ok({ ignored: type })
+
+  if (type === 'pull_request') {
+    await pullRequestEvent(env, installationId, event as Parameters<typeof pullRequestEvent>[2], async (org, slug) => {
+      await notifyRunners(env, org, { type: 'prd-changed', project: slug })
+    })
+    return ok({ received: `${type}.${event.action ?? ''}` })
+  }
 
   switch (`${type}.${event.action ?? ''}`) {
     // installation.created is deliberately not handled: a webhook cannot say

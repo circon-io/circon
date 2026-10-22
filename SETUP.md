@@ -24,6 +24,7 @@ the dashboard to provide one.
 | `GH_APP_PRIVATE_KEY` | Created in step 6 below. Paste the whole PEM including the BEGIN/END lines. **Must be PKCS#8** — see step 6. |
 | `GH_WEBHOOK_SECRET` | Generate yourself: `openssl rand -hex 32`. Also entered in the App's settings. |
 | `GH_CLIENT_SECRET` | The App's page → **Generate a new client secret** (step 6). Proves who completed an install. |
+| `SECRETS_MASTER_KEY` | Generate yourself: `openssl rand -base64 32`. Seals every org and project secret stored in D1. **Losing or changing it makes every stored secret unreadable**, so keep a copy as carefully as the pepper. |
 | `ANTHROPIC_API_KEY` | console.anthropic.com → API Keys. Pays for plan generation in the dashboard, which is metered per org against `planGenerations` in `billing/plans.ts`. Runners never see it. |
 
 `GITHUB_TOKEN` is injected automatically. **Do not create one.**
@@ -180,8 +181,10 @@ account".
 | Metadata | Read | Mandatory, granted automatically |
 | Workflows | Read and write | Only if the agent should be able to edit `.github/workflows` — omit otherwise |
 
-**Subscribe to events**: `Installation target`, `Repository` — enough to notice an
-uninstall or a repository being deselected. Nothing else is read.
+**Subscribe to events**: `Installation target`, `Repository` and `Pull request`.
+The first two notice an uninstall or a deselected repository. `Pull request`
+keeps each run's PR state current (gate 1) and lets a merged plan PR reach
+running loops. Nothing else is read.
 
 Then, on the App's page:
 
@@ -295,10 +298,10 @@ rather than reaching for the template.
 
 ```
 [ ] GitHub environment `production` with required reviewers
-[ ] 9 secrets  (CLOUDFLARE_API_TOKEN, CLERK_SECRET_KEY, RUNNER_SECRET_PEPPER,
+[ ] 10 secrets (CLOUDFLARE_API_TOKEN, CLERK_SECRET_KEY, RUNNER_SECRET_PEPPER,
                 STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET,
                 GH_APP_PRIVATE_KEY, GH_WEBHOOK_SECRET, GH_CLIENT_SECRET,
-                ANTHROPIC_API_KEY)
+                ANTHROPIC_API_KEY, SECRETS_MASTER_KEY)
 [ ] 12 variables (CLOUDFLARE_ACCOUNT_ID, CLERK_JWKS_URL, CLERK_ISSUER,
                   NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY, STRIPE_PRICE_PRO,
                   GH_APP_ID, GH_APP_SLUG, GH_CLIENT_ID,

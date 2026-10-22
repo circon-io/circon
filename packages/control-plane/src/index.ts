@@ -15,6 +15,8 @@ import {
   claimJob, queueJob, recordRun, listRuns, getRun,
 } from './fleet.ts'
 import { listPlans, getPlan, editPlan, streamPlan, approvePlan } from './planning/routes.ts'
+import { releaseReport, approveRelease } from './releases.ts'
+import { listSecrets, putSecret, deleteSecret, secretsForJob } from './secrets.ts'
 import { createCheckout, createPortal, handleWebhook } from './billing/stripe.ts'
 import { publicPlans, isPlanId } from './billing/plans.ts'
 
@@ -129,6 +131,12 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         return await runnerPullRequest(request, env, principal.org)
       }
 
+      if (path === '/api/runner/secrets' && request.method === 'GET') {
+        const principal = await authenticateRunner(request, env)
+        if (!principal) return unauthorized()
+        return await secretsForJob(env, principal.id, principal.org, url.searchParams.get('job') ?? '')
+      }
+
       if (path === '/api/runner/run' && request.method === 'POST') {
         const principal = await authenticateRunner(request, env)
         if (!principal) return unauthorized()
@@ -197,6 +205,21 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
           if (Number.isInteger(version) && rest[1] === 'approve' && request.method === 'POST') {
             return await approvePlan(env, principal.org, principal.id, projectId, version)
           }
+        }
+        if (/^\/api\/projects\/[^/]+\/release$/.test(path) && request.method === 'GET') {
+          return await releaseReport(env, principal.org, segment(3))
+        }
+        if (/^\/api\/projects\/[^/]+\/release\/approve$/.test(path) && request.method === 'POST') {
+          return await approveRelease(env, principal.org, principal.id, segment(3))
+        }
+        if (path === '/api/secrets' && request.method === 'GET') {
+          return await listSecrets(env, principal.org, url)
+        }
+        if (path === '/api/secrets' && request.method === 'POST') {
+          return await putSecret(request, env, principal.org, principal.id)
+        }
+        if (/^\/api\/secrets\/[^/]+$/.test(path) && request.method === 'DELETE') {
+          return await deleteSecret(env, principal.org, segment(3))
         }
         if (/^\/api\/projects\/[^/]+\/config$/.test(path)) {
           if (request.method === 'GET') return await getProjectConfig(env, principal.org, segment(3))

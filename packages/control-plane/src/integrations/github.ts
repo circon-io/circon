@@ -290,6 +290,53 @@ export async function commitFile(
   return url ? { kind: 'pull-request', url } : { kind: 'failed', reason: 'GitHub declined to open the pull request' }
 }
 
+export interface PullRequest {
+  number: number
+  url: string
+  title: string
+  body: string
+  createdAt: string
+}
+
+/** The open PR from `head` into `base`, if there is one. */
+export async function findOpenPull(
+  env: Env,
+  installationId: string,
+  fullName: string,
+  head: string,
+  base: string,
+): Promise<PullRequest | null> {
+  const token = await repoToken(env, installationId, fullName)
+  const owner = fullName.split('/')[0] ?? ''
+  const res = await fetch(
+    `${API}/repos/${fullName}/pulls?state=open&head=${encodeURIComponent(`${owner}:${head}`)}&base=${encodeURIComponent(base)}`,
+    { headers: headers(token) },
+  )
+  if (!res.ok) return null
+  const pulls = (await res.json()) as Array<{ number: number; html_url: string; title: string; body: string | null; created_at: string }>
+  const pull = pulls[0]
+  return pull
+    ? { number: pull.number, url: pull.html_url, title: pull.title, body: pull.body ?? '', createdAt: pull.created_at }
+    : null
+}
+
+/** Merge a PR. GitHub's own checks and protection rules still apply and may refuse. */
+export async function mergePull(
+  env: Env,
+  installationId: string,
+  fullName: string,
+  number: number,
+): Promise<{ ok: true; sha: string } | { ok: false; reason: string }> {
+  const token = await repoToken(env, installationId, fullName)
+  const res = await fetch(`${API}/repos/${fullName}/pulls/${number}/merge`, {
+    method: 'PUT',
+    headers: headers(token),
+    body: JSON.stringify({ merge_method: 'squash' }),
+  })
+  const body = (await res.json().catch(() => ({}))) as { sha?: string; message?: string }
+  return res.ok ? { ok: true, sha: body.sha ?? '' } : { ok: false, reason: body.message ?? `HTTP ${res.status}` }
+}
+
 /** The account an installation is on, for display. Uses the App JWT. */
 export async function getInstallation(
   env: Env,

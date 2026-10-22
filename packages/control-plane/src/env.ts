@@ -36,6 +36,8 @@ export interface Env {
   GH_CLIENT_SECRET?: string
   /** Our key, for plan generation. Metered per org against the plan. */
   ANTHROPIC_API_KEY?: string
+  /** 32 random bytes, base64: the key every stored org and project secret is sealed with. */
+  SECRETS_MASTER_KEY?: string
 }
 
 export function json(body: unknown, status = 200): Response {

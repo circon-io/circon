@@ -469,6 +469,7 @@ export async function recordRun(
     failedTier?: string
     jobId?: string
     agents?: unknown
+    screenshots?: unknown
   } | null
 
   if (!body?.runId || !body.projectSlug) {
@@ -485,10 +486,16 @@ export async function recordRun(
     jobId = job?.id ?? null
   }
 
+  // Links into the run's own branch, shown in the release report. Only https
+  // URLs, and a handful: this is a review aid, not storage.
+  const screenshots = Array.isArray(body.screenshots)
+    ? body.screenshots.filter((s): s is string => typeof s === 'string' && /^https:\/\/github\.com\//.test(s)).slice(0, 12)
+    : []
+
   await env.DB.prepare(
     `INSERT INTO runs (id, runner_id, org, job_id, project_slug, branch, started_at, finished_at,
-                       outcome, iterations, commits, cost_usd, pr_url, failed_tier, agents)
-     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
+                       outcome, iterations, commits, cost_usd, pr_url, failed_tier, agents, screenshots)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
      ON CONFLICT (id) DO UPDATE SET
        finished_at = excluded.finished_at,
        outcome     = excluded.outcome,
@@ -497,7 +504,8 @@ export async function recordRun(
        cost_usd    = excluded.cost_usd,
        pr_url      = excluded.pr_url,
        failed_tier = excluded.failed_tier,
-       agents      = COALESCE(excluded.agents, runs.agents)
+       agents      = COALESCE(excluded.agents, runs.agents),
+       screenshots = COALESCE(excluded.screenshots, runs.screenshots)
      WHERE runs.runner_id = excluded.runner_id`,
   )
     .bind(
@@ -506,6 +514,7 @@ export async function recordRun(
       body.outcome ?? 'running', body.iterations ?? 0, body.commits ?? 0,
       body.costUsd ?? 0, body.prUrl ?? null, body.failedTier ?? null,
       body.agents ? JSON.stringify(body.agents) : null,
+      screenshots.length ? JSON.stringify(screenshots) : null,
     )
     .run()
 
