@@ -65,11 +65,18 @@ export async function resolve(cliVersion: string): Promise<Resolution> {
 
   const git = (...args: string[]) => run('git', ['-C', paths.conventions, ...args])
 
-  await git('fetch', '--tags', '--quiet')
+  // Fetch, never pull: a resolved clone sits on a detached tag, where a pull
+  // fails, and that used to break every `circon update` after the first.
+  await git('fetch', '--tags', '--prune', '--quiet', 'origin')
   const tagList = await git('tag', '--list')
   const tags = parseTags(tagList.stdout)
 
   if (tags.length === 0) {
+    // Untagged: follow the default branch.
+    const head = await git('symbolic-ref', '--short', 'refs/remotes/origin/HEAD')
+    const branch = head.ok ? head.stdout.trim().replace(/^origin\//, '') : 'main'
+    await git('checkout', '--quiet', branch)
+    await git('merge', '--ff-only', '--quiet', `origin/${branch}`)
     return { ref: null, requiresCli: currentRequirement() }
   }
 
@@ -98,6 +105,15 @@ export async function resolve(cliVersion: string): Promise<Resolution> {
       (newestNeeds ? ` — the newest (${newest}) needs >=${newestNeeds}` : '') +
       '. Run `npm update -g @circon/cli`.',
   }
+}
+
+/** What the clone is on now: the tag when pinned, else a short commit. Shown in the dashboard. */
+export async function currentRef(): Promise<string | null> {
+  if (!existsSync(paths.conventions)) return null
+  const tag = await run('git', ['-C', paths.conventions, 'describe', '--tags', '--exact-match', 'HEAD'])
+  if (tag.ok && tag.stdout.trim()) return tag.stdout.trim()
+  const sha = await run('git', ['-C', paths.conventions, 'rev-parse', '--short', 'HEAD'])
+  return sha.ok ? sha.stdout.trim() : null
 }
 
 /**

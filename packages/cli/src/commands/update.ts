@@ -27,12 +27,7 @@ export async function updateCommand(): Promise<number> {
 
   const before = await run('git', ['-C', paths.conventions, 'rev-parse', '--short', 'HEAD'])
 
-  // Pull the branch first so newly pushed tags are visible, then resolve.
-  const pull = await run('git', ['-C', paths.conventions, 'pull', '--ff-only', '--quiet'])
-  if (!pull.ok) {
-    ui.warn('Could not fast-forward — the clone has local changes or is detached.')
-  }
-
+  // resolve() fetches tags and the branch itself.
   const version = cliVersion()
   const resolution = await resolve(version)
 
