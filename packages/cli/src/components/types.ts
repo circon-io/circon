@@ -27,6 +27,16 @@ export interface CheckResult {
   detail?: string
 }
 
+/** The operating systems a runner can be. */
+export type Platform = 'linux' | 'darwin'
+
+export const EVERYWHERE: Platform[] = ['linux', 'darwin']
+
+/** This machine's platform, or null on one circon does not provision. */
+export function currentPlatform(): Platform | null {
+  return process.platform === 'linux' || process.platform === 'darwin' ? process.platform : null
+}
+
 export interface Component {
   id: string
   /** What this provides, in a few words. Shown by `doctor`. */
@@ -36,10 +46,11 @@ export interface Component {
   /** Needs root. `setup` groups these so sudo is primed once. */
   privileged?: boolean
   /**
-   * True when this component is only meaningful on the target OS. Checks still
-   * run elsewhere (so `doctor` works on a laptop), but report `skipped`.
+   * Where this component applies. Required, so a new component has to decide:
+   * elsewhere it is reported `skipped` and never installed. Platform-specific
+   * steps inside check() and install() branch on `currentPlatform()`.
    */
-  linuxOnly?: boolean
+  platforms: Platform[]
 
   check(): Promise<CheckResult>
   install(): Promise<void>

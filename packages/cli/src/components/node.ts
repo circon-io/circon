@@ -1,6 +1,6 @@
 import { run, sh, which, versionOf, satisfiesMinimum } from '../core/exec.ts'
 import { PINNED, FLOATING } from '../core/spec.ts'
-import { type Component, ok, missing, outdated, foreign } from './types.ts'
+import { type Component, ok, missing, outdated, foreign, currentPlatform, EVERYWHERE } from './types.ts'
 
 /**
  * Node is the component most likely to already exist, and the one most easily
@@ -28,7 +28,8 @@ async function nodeIsManagedElsewhere(nodePath: string): Promise<string | null> 
 export const nodeComponent: Component = {
   id: 'node',
   summary: `Node.js ${PINNED.nodeMajor}.x (minimum ${PINNED.nodeMinimum})`,
-  privileged: true,
+  privileged: currentPlatform() === 'linux',
+  platforms: EVERYWHERE,
 
   async check() {
     const path = await which('node')
@@ -58,6 +59,14 @@ export const nodeComponent: Component = {
   },
 
   async install() {
+    if (currentPlatform() === 'darwin') {
+      const r = await sh(
+        `brew install node@${PINNED.nodeMajor} && brew link --overwrite --force node@${PINNED.nodeMajor}`,
+        { stream: true },
+      )
+      if (!r.ok) throw new Error(`brew install node failed (exit ${r.code})`)
+      return
+    }
     const r = await sh(
       `curl -fsSL https://deb.nodesource.com/setup_${PINNED.nodeMajor}.x | sudo -E bash - && sudo apt install -y nodejs`,
       { stream: true },
@@ -74,7 +83,8 @@ export const jsGlobalsComponent: Component = {
   id: 'js-globals',
   summary: 'Global npm tooling (pnpm, agent-device, claude-code, codex, eas-cli)',
   requires: ['node'],
-  privileged: true,
+  privileged: currentPlatform() === 'linux',
+  platforms: EVERYWHERE,
 
   async check() {
     const binaries: Record<string, string> = {
@@ -101,7 +111,10 @@ export const jsGlobalsComponent: Component = {
     // the other four from landing.
     const failures: string[] = []
     for (const pkg of FLOATING.npmGlobals) {
-      const r = await run('sudo', ['npm', 'install', '-g', pkg], { stream: true })
+      // Homebrew's npm owns its global prefix; NodeSource's needs root.
+      const r = currentPlatform() === 'darwin'
+        ? await run('npm', ['install', '-g', pkg], { stream: true })
+        : await run('sudo', ['npm', 'install', '-g', pkg], { stream: true })
       if (!r.ok) failures.push(pkg)
     }
     if (failures.length) {

@@ -1,6 +1,5 @@
-import { platform } from 'node:os'
 import { components } from '../components/registry.ts'
-import type { CheckResult, Component } from '../components/types.ts'
+import { currentPlatform, type CheckResult, type Component } from '../components/types.ts'
 import { ui } from '../core/ui.ts'
 import { paths } from '../core/paths.ts'
 import { detectDrift } from '../core/conventions.ts'
@@ -21,11 +20,11 @@ export interface Diagnosis {
  * definition of what "installed" means.
  */
 export async function diagnose(): Promise<Diagnosis[]> {
-  const onLinux = platform() === 'linux'
+  const here = currentPlatform()
   const out: Diagnosis[] = []
 
   for (const component of components) {
-    if (component.linuxOnly && !onLinux) {
+    if (!here || !component.platforms.includes(here)) {
       out.push({ component, result: null, skipped: true })
       continue
     }

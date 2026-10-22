@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { run, sh, which } from '../core/exec.ts'
 import { paths } from '../core/paths.ts'
-import { type Component, ok, missing, foreign } from './types.ts'
+import { type Component, ok, missing, foreign, currentPlatform, EVERYWHERE } from './types.ts'
 
 const APT_BASE = [
   'curl', 'wget', 'git', 'build-essential', 'unzip', 'jq', 'tmux', 'screen', 'htop',
@@ -18,7 +18,7 @@ export const aptBaseComponent: Component = {
   id: 'apt-base',
   summary: 'Base packages (build tools, git, jq, JDK 17, openssh)',
   privileged: true,
-  linuxOnly: true,
+  platforms: ['linux'],
 
   async check() {
     const absent: string[] = []
@@ -41,7 +41,7 @@ export const sshComponent: Component = {
   summary: 'OpenSSH server enabled',
   requires: ['apt-base'],
   privileged: true,
-  linuxOnly: true,
+  platforms: ['linux'],
 
   async check() {
     const r = await run('systemctl', ['is-enabled', 'ssh'])
@@ -57,7 +57,7 @@ export const kvmComponent: Component = {
   id: 'kvm',
   summary: 'KVM virtualisation (Android emulator acceleration)',
   privileged: true,
-  linuxOnly: true,
+  platforms: ['linux'],
 
   async check() {
     if (!existsSync('/dev/kvm')) return missing('/dev/kvm absent')
@@ -84,7 +84,7 @@ export const dockerComponent: Component = {
   id: 'docker',
   summary: 'Docker Engine',
   privileged: true,
-  linuxOnly: true,
+  platforms: ['linux'],
 
   async check() {
     const path = await which('docker')
@@ -115,7 +115,7 @@ export const nvidiaComponent: Component = {
   id: 'nvidia',
   summary: 'NVIDIA drivers and CUDA toolkit',
   privileged: true,
-  linuxOnly: true,
+  platforms: ['linux'],
 
   async check() {
     if (!(await which('nvidia-smi'))) return missing('nvidia-smi not found')
@@ -140,7 +140,7 @@ export const sysctlComponent: Component = {
   id: 'sysctl',
   summary: 'inotify watch limit (Expo/Metro ENOSPC fix)',
   privileged: true,
-  linuxOnly: true,
+  platforms: ['linux'],
 
   async check() {
     const r = await run('sysctl', ['-n', 'fs.inotify.max_user_watches'])
@@ -162,6 +162,7 @@ export const sysctlComponent: Component = {
 export const gitIdentityComponent: Component = {
   id: 'git-identity',
   summary: 'Git identity for agent commits',
+  platforms: EVERYWHERE,
 
   async check() {
     const name = await run('git', ['config', '--global', 'user.name'])
@@ -179,45 +180,56 @@ export const gitIdentityComponent: Component = {
 }
 
 /**
- * One file the CLI owns outright, sourced by ~/.bashrc through a single guarded
- * line. Adding a PATH entry later rewrites this file and never touches .bashrc
- * again — which is what stops the append-forever problem at the source.
+ * One file the CLI owns outright, sourced from the login shell's rc file through
+ * a single guarded line. Adding a PATH entry later rewrites this file and never
+ * touches the rc file again — which is what stops the append-forever problem at
+ * the source.
  */
+function rcFile(): string {
+  // macOS has defaulted to zsh since Catalina; Ubuntu to bash.
+  return `${process.env['HOME']}/${currentPlatform() === 'darwin' ? '.zshrc' : '.bashrc'}`
+}
+
+export function envFileLines(platform = currentPlatform()): string[] {
+  const androidHome = platform === 'darwin' ? '$HOME/Library/Android/sdk' : '$HOME/Android/Sdk'
+  return [
+    '# Managed by circon. Edits here are overwritten — change the CLI instead.',
+    `export ANDROID_HOME="${androidHome}"`,
+    'export ANDROID_SDK_ROOT="$ANDROID_HOME"',
+    'export PATH="$PATH:$ANDROID_HOME/emulator"',
+    'export PATH="$PATH:$ANDROID_HOME/platform-tools"',
+    'export PATH="$PATH:$ANDROID_HOME/cmdline-tools/latest/bin"',
+    'export PATH="$PATH:$HOME/.local/bin"',
+    // Homebrew's JDK is keg-only, so the Android tools would not find it.
+    ...(platform === 'darwin'
+      ? ['[ -d "$(brew --prefix openjdk@17 2>/dev/null)" ] && export JAVA_HOME="$(brew --prefix openjdk@17)/libexec/openjdk.jdk/Contents/Home"']
+      : []),
+    '',
+  ]
+}
+
 export const shellEnvComponent: Component = {
   id: 'shell-env',
   summary: 'Shell environment (PATH for Android SDK, tools)',
+  platforms: EVERYWHERE,
 
   async check() {
-    const bashrc = `${process.env['HOME']}/.bashrc`
+    const rc = rcFile()
     if (!existsSync(paths.envFile)) return missing('env.sh not written')
-    if (!existsSync(bashrc)) return missing('~/.bashrc absent')
-    const sourced = readFileSync(bashrc, 'utf8').includes(paths.envFile)
-    return sourced ? ok('sourced from ~/.bashrc') : missing('written but not sourced')
+    if (readFileSync(paths.envFile, 'utf8') !== envFileLines().join('\n')) return missing('env.sh is out of date')
+    if (!existsSync(rc)) return missing(`${rc} absent`)
+    const sourced = readFileSync(rc, 'utf8').includes(paths.envFile)
+    return sourced ? ok(`sourced from ${rc}`) : missing('written but not sourced')
   },
 
   async install() {
     mkdirSync(paths.config, { recursive: true })
-    writeFileSync(
-      paths.envFile,
-      [
-        '# Managed by circon. Edits here are overwritten — change the CLI instead.',
-        'export ANDROID_HOME="$HOME/Android/Sdk"',
-        'export ANDROID_SDK_ROOT="$ANDROID_HOME"',
-        'export PATH="$PATH:$ANDROID_HOME/emulator"',
-        'export PATH="$PATH:$ANDROID_HOME/platform-tools"',
-        'export PATH="$PATH:$ANDROID_HOME/cmdline-tools/latest/bin"',
-        'export PATH="$PATH:$HOME/.local/bin"',
-        '',
-      ].join('\n'),
-    )
+    writeFileSync(paths.envFile, envFileLines().join('\n'))
 
-    const bashrc = `${process.env['HOME']}/.bashrc`
-    const existing = existsSync(bashrc) ? readFileSync(bashrc, 'utf8') : ''
+    const rc = rcFile()
+    const existing = existsSync(rc) ? readFileSync(rc, 'utf8') : ''
     if (!existing.includes(paths.envFile)) {
-      writeFileSync(
-        bashrc,
-        `${existing}\n# circon environment\n[ -f "${paths.envFile}" ] && . "${paths.envFile}"\n`,
-      )
+      writeFileSync(rc, `${existing}\n# circon environment\n[ -f "${paths.envFile}" ] && . "${paths.envFile}"\n`)
     }
   },
 }

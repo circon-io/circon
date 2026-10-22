@@ -1,21 +1,32 @@
 import { existsSync } from 'node:fs'
 import { run, sh, which } from '../core/exec.ts'
 import { PINNED } from '../core/spec.ts'
-import { type Component, ok, missing, foreign } from './types.ts'
+import { type Component, ok, missing, foreign, currentPlatform, EVERYWHERE } from './types.ts'
 
 export const ollamaComponent: Component = {
   id: 'ollama',
-  summary: 'Ollama local inference server',
-  privileged: true,
-  linuxOnly: true,
+  summary: 'Ollama local inference server (CUDA on Linux, Metal on macOS)',
+  privileged: currentPlatform() === 'linux',
+  platforms: EVERYWHERE,
 
   async check() {
     if (!(await which('ollama'))) return missing('not installed')
+    if (currentPlatform() === 'darwin') {
+      const listed = await run('ollama', ['list'], { timeoutMs: 10_000 })
+      return listed.ok ? ok('running') : ok("installed, not running — 'brew services start ollama'")
+    }
     const active = await run('systemctl', ['is-active', '--quiet', 'ollama'])
     return active.ok ? ok('running') : ok('installed, service stopped')
   },
 
   async install() {
+    if (currentPlatform() === 'darwin') {
+      // Homebrew's build uses Metal; a launchd service keeps it running.
+      const r = await run('brew', ['install', 'ollama'], { stream: true })
+      if (!r.ok) throw new Error(`brew install ollama failed (exit ${r.code})`)
+      await run('brew', ['services', 'start', 'ollama'], { stream: true })
+      return
+    }
     const r = await sh('curl -fsSL https://ollama.com/install.sh | sh', { stream: true })
     if (!r.ok) throw new Error(`ollama install failed (exit ${r.code})`)
     await run('sudo', ['systemctl', 'enable', '--now', 'ollama'])
@@ -31,7 +42,7 @@ export const ollamaModelComponent: Component = {
   id: 'ollama-model',
   summary: `Local coding model (${PINNED.ollamaModel})`,
   requires: ['ollama'],
-  linuxOnly: true,
+  platforms: EVERYWHERE,
 
   async check() {
     if (!(await which('ollama'))) return missing('ollama not installed')
@@ -59,7 +70,7 @@ export const ollamaTuningComponent: Component = {
   summary: 'Ollama flash attention (VRAM efficiency)',
   requires: ['ollama'],
   privileged: true,
-  linuxOnly: true,
+  platforms: ['linux'],
 
   async check() {
     const file = '/etc/systemd/system/ollama.service.d/override.conf'
@@ -85,6 +96,7 @@ export const ollamaTuningComponent: Component = {
 export const aiderComponent: Component = {
   id: 'aider',
   summary: 'aider (architect/editor coding agent)',
+  platforms: EVERYWHERE,
 
   async check() {
     const path = await which('aider')
@@ -119,6 +131,7 @@ export const context7Component: Component = {
   id: 'context7',
   summary: 'context7 MCP server (current library docs for agents)',
   requires: ['js-globals'],
+  platforms: EVERYWHERE,
 
   async check() {
     if (!(await which('claude'))) return missing('claude not installed')

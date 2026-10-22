@@ -2,21 +2,28 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
 import { run, sh, which } from '../core/exec.ts'
-import { type Component, ok, missing, foreign } from './types.ts'
+import { type Component, ok, missing, foreign, currentPlatform, EVERYWHERE } from './types.ts'
+import { javaHome } from './apple.ts'
 
-const ANDROID_HOME = () => process.env['ANDROID_HOME'] ?? join(homedir(), 'Android', 'Sdk')
+/** Where each platform's tooling expects the SDK: Android Studio's own default. */
+export const defaultAndroidHome = () =>
+  currentPlatform() === 'darwin' ? join(homedir(), 'Library', 'Android', 'sdk') : join(homedir(), 'Android', 'Sdk')
+const ANDROID_HOME = () => process.env['ANDROID_HOME'] ?? defaultAndroidHome()
+const toolsOs = () => (currentPlatform() === 'darwin' ? 'mac' : 'linux')
+/** Apple Silicon runs the arm64 emulator natively; x86_64 images there are emulated and slow. */
+const imageAbi = () => (process.arch === 'arm64' ? 'arm64-v8a' : 'x86_64')
 const sdkmanager = () => join(ANDROID_HOME(), 'cmdline-tools', 'latest', 'bin', 'sdkmanager')
 const avdmanager = () => join(ANDROID_HOME(), 'cmdline-tools', 'latest', 'bin', 'avdmanager')
 
 /** Known-good fallback if the download page layout changes. */
-const CMDLINE_TOOLS_FALLBACK =
-  'https://dl.google.com/android/repository/commandlinetools-linux-15859902_latest.zip'
+const CMDLINE_TOOLS_FALLBACK = () =>
+  `https://dl.google.com/android/repository/commandlinetools-${toolsOs()}-15859902_latest.zip`
 
 export const androidStudioComponent: Component = {
   id: 'android-studio',
   summary: 'Android Studio (IDE)',
   privileged: true,
-  linuxOnly: true,
+  platforms: ['linux'],
 
   async check() {
     // `snap install` exits non-zero when the snap is already present, which is
@@ -41,8 +48,9 @@ export const androidStudioComponent: Component = {
 export const androidSdkComponent: Component = {
   id: 'android-sdk',
   summary: 'Android SDK, platform-tools, emulator and an AVD (headless)',
-  requires: ['apt-base'],
-  linuxOnly: true,
+  // A JDK: from apt-base on Linux, the java component on macOS.
+  requires: ['apt-base', 'java'],
+  platforms: EVERYWHERE,
 
   async check() {
     if (!existsSync(sdkmanager())) {
@@ -76,14 +84,19 @@ export const androidSdkComponent: Component = {
 
   async install() {
     const home = ANDROID_HOME()
+    // sdkmanager is a Java program; Homebrew's JDK is not on the default path.
+    if (currentPlatform() === 'darwin' && !process.env['JAVA_HOME']) {
+      const java = await javaHome()
+      if (java) process.env['JAVA_HOME'] = java
+    }
     await run('mkdir', ['-p', join(home, 'cmdline-tools')])
 
     if (!existsSync(sdkmanager())) {
       const page = await sh(
         'curl -fsSL --max-time 30 https://developer.android.com/studio 2>/dev/null | ' +
-          'grep -oE "https://dl\\.google\\.com/android/repository/commandlinetools-linux-[0-9]+_latest\\.zip" | head -1',
+          `grep -oE "https://dl\\.google\\.com/android/repository/commandlinetools-${toolsOs()}-[0-9]+_latest\\.zip" | head -1`,
       )
-      const url = page.stdout.trim() || CMDLINE_TOOLS_FALLBACK
+      const url = page.stdout.trim() || CMDLINE_TOOLS_FALLBACK()
       const r = await sh(
         `set -e
          tmp=$(mktemp -d)
@@ -115,9 +128,9 @@ export const androidSdkComponent: Component = {
       .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
       .at(-1)
 
-    let sysImage = `system-images;android-${api};google_apis;x86_64`
+    let sysImage = `system-images;android-${api};google_apis;${imageAbi()}`
     if (!list.stdout.includes(sysImage)) {
-      const playstore = `system-images;android-${api};google_apis_playstore;x86_64`
+      const playstore = `system-images;android-${api};google_apis_playstore;${imageAbi()}`
       sysImage = list.stdout.includes(playstore) ? playstore : ''
     }
 

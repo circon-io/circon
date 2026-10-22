@@ -45,12 +45,16 @@ export async function enrollCommand(args: string[]): Promise<number> {
   // Installed here rather than left to `setup`, because its check() reports ok
   // on an unenrolled machine — so a setup run before this point skipped it, and
   // nobody would think to run setup again after enrolling.
-  if (process.platform === 'linux') {
+  if (process.platform === 'linux' || process.platform === 'darwin') {
     const { agentServiceComponent } = await import('../components/workspace.ts')
     const status = await agentServiceComponent.check()
     if (status.status === 'ok') {
-      ui.ok('Agent service already running — it will pick up the new credential on restart.')
-      await run('systemctl', ['--user', 'restart', 'circon-agent.service'])
+      ui.ok('Agent service already running — restarting it with the new credential.')
+      if (process.platform === 'darwin') {
+        await run('launchctl', ['kickstart', '-k', `gui/${process.getuid?.() ?? 501}/io.circon.agent`])
+      } else {
+        await run('systemctl', ['--user', 'restart', 'circon-agent.service'])
+      }
     } else {
       try {
         await agentServiceComponent.install()
@@ -61,7 +65,7 @@ export async function enrollCommand(args: string[]): Promise<number> {
       }
     }
   } else {
-    ui.info("Start the daemon with 'circon agent'. Boot-time startup needs Linux.")
+    ui.info("Start the daemon with 'circon agent'. Starting it at boot needs Linux or macOS.")
   }
   return 0
 }

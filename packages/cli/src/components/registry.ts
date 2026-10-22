@@ -12,12 +12,16 @@ import {
 import {
   workspaceComponent, conventionsComponent, dailyReportComponent, agentServiceComponent,
 } from './workspace.ts'
+import {
+  homebrewComponent, javaComponent, xcodeComponent, iosSimulatorComponent, iosDeviceComponent,
+} from './apple.ts'
 
 /**
  * Declaration order is install order. `requires` is validated against it, so a
  * component can never be scheduled before something it depends on.
  */
 export const components: Component[] = [
+  homebrewComponent,
   aptBaseComponent,
   sshComponent,
   nvidiaComponent,
@@ -26,7 +30,11 @@ export const components: Component[] = [
   nodeComponent,
   jsGlobalsComponent,
   androidStudioComponent,
+  javaComponent,
   androidSdkComponent,
+  xcodeComponent,
+  iosSimulatorComponent,
+  iosDeviceComponent,
   aiderComponent,
   context7Component,
   ollamaComponent,
@@ -45,7 +53,13 @@ export function componentById(id: string): Component | undefined {
   return components.find((c) => c.id === id)
 }
 
-/** Throws if a `requires` names something unknown or declared later. */
+/**
+ * Throws if a `requires` names something unknown or declared later.
+ *
+ * A requirement on a component that does not apply to this platform counts as
+ * met: `android-sdk` needs a JDK, which is `apt-base` on Linux and `java` on
+ * macOS, and each machine only installs its own.
+ */
 export function validateOrdering(list: Component[] = components): void {
   const seen = new Set<string>()
   for (const component of list) {

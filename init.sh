@@ -1,6 +1,6 @@
 #!/bin/bash
 # ==============================================================================
-# circon bootstrap — Ubuntu
+# circon bootstrap — Ubuntu or macOS
 # ==============================================================================
 # This script does the smallest possible job: get Node and the circon CLI onto a
 # fresh machine. Everything after that is the CLI's responsibility.
@@ -24,17 +24,30 @@ ok()   { printf '\033[32m✓\033[0m %s\n' "$*"; }
 warn() { printf '\033[33m!\033[0m %s\n' "$*"; }
 die()  { printf '\033[31m✗\033[0m %s\n' "$*" >&2; exit 1; }
 
-[ "$(uname -s)" = "Linux" ] || die "This bootstrap targets Ubuntu. On other systems install the CLI directly: npm i -g $CLI_PACKAGE"
+OS="$(uname -s)"
+case "$OS" in
+  Linux|Darwin) ;;
+  *) die "This bootstrap targets Ubuntu and macOS. Elsewhere install the CLI directly: npm i -g $CLI_PACKAGE" ;;
+esac
 [ "$(id -u)" -ne 0 ] || die "Run this as your normal user, not root. It will ask for sudo when needed."
 
 say "circon bootstrap"
 echo "Installing only Node and the CLI; 'circon setup' does the rest."
 
-# --- 1. Enough apt to fetch anything else -------------------------------------
+# --- 1. Enough to fetch anything else -----------------------------------------
 say "[1/3] Base packages"
-sudo apt-get update -qq
-sudo apt-get install -y -qq curl ca-certificates gnupg git
-ok "curl, git and certificates present"
+if [ "$OS" = "Darwin" ]; then
+  # Homebrew is where everything else on a Mac runner comes from.
+  if ! command -v brew > /dev/null 2>&1; then
+    NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+    eval "$(/opt/homebrew/bin/brew shellenv 2>/dev/null || /usr/local/bin/brew shellenv)"
+  fi
+  ok "Homebrew $(brew --version | head -1 | cut -d' ' -f2) present"
+else
+  sudo apt-get update -qq
+  sudo apt-get install -y -qq curl ca-certificates gnupg git
+  ok "curl, git and certificates present"
+fi
 
 # --- 2. Node --------------------------------------------------------------
 # Adopt an existing install when it is new enough. A version manager (nvm, fnm,
@@ -53,18 +66,26 @@ else
   if [ -n "$CURRENT_NODE" ]; then
     warn "Node v$CURRENT_NODE is too old (need 22.12+); installing ${NODE_MAJOR}.x"
   fi
-  curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | sudo -E bash -
-  sudo apt-get install -y nodejs
+  if [ "$OS" = "Darwin" ]; then
+    brew install "node@${NODE_MAJOR}" && brew link --overwrite --force "node@${NODE_MAJOR}"
+  else
+    curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | sudo -E bash -
+    sudo apt-get install -y nodejs
+  fi
   ok "Node $(node --version) installed"
 fi
 
 # --- 3. The CLI ---------------------------------------------------------------
 say "[3/3] circon CLI"
-if command -v circon > /dev/null 2>&1; then
-  sudo npm install -g "$CLI_PACKAGE" > /dev/null
+# Homebrew's npm owns its global prefix; NodeSource's needs root.
+NPM="sudo npm"
+[ "$OS" = "Darwin" ] && NPM="npm"
+WAS_INSTALLED=0
+command -v circon > /dev/null 2>&1 && WAS_INSTALLED=1
+$NPM install -g "$CLI_PACKAGE" > /dev/null
+if [ "$WAS_INSTALLED" -eq 1 ]; then
   ok "circon updated to $(circon --version)"
 else
-  sudo npm install -g "$CLI_PACKAGE" > /dev/null
   ok "circon $(circon --version) installed"
 fi
 
@@ -83,6 +104,7 @@ Then, any time:
   circon init       scaffold a project
   circon run        drive the agent loop
 
-A reboot is needed after the first setup, for the kvm and docker groups.
+On Linux, reboot after the first setup for the kvm and docker groups.
+On macOS, install Xcode from the App Store for iOS testing.
 ──────────────────────────────────────────────────────────────────────────
 NEXT

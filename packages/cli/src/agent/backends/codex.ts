@@ -104,7 +104,7 @@ export function codexBackend(exec: Exec = run): AgentBackend {
     needsLocalModel: () => false,
     async available(): Promise<Availability> {
       if (!(await which('codex'))) {
-        return { ok: false, billing: 'subscription', reason: "Codex is not installed — run 'circon setup --only codex'" }
+        return { ok: false, billing: 'subscription', reason: "Codex is not installed — run 'circon setup --only js-globals'" }
       }
       const status = await exec('codex', ['login', 'status'], { timeoutMs: 20_000 })
       if (!status.ok) {

@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { run, which } from '../core/exec.ts'
 import { paths } from '../core/paths.ts'
 import { readConfig } from '../core/config.ts'
-import { type Component, ok, missing } from './types.ts'
+import { type Component, ok, missing, currentPlatform, EVERYWHERE } from './types.ts'
 import { isEnrolled } from '../agent/control-plane.ts'
 
 export const DEFAULT_CONVENTIONS_REPO = 'https://github.com/circon-io/circon-conventions.git'
@@ -11,6 +11,7 @@ export const DEFAULT_CONVENTIONS_REPO = 'https://github.com/circon-io/circon-con
 export const workspaceComponent: Component = {
   id: 'workspace',
   summary: 'Project and workspace directories',
+  platforms: EVERYWHERE,
 
   async check() {
     const wanted = [paths.projects, paths.workspace, paths.config, paths.state]
@@ -35,6 +36,7 @@ export const workspaceComponent: Component = {
 export const conventionsComponent: Component = {
   id: 'conventions',
   summary: 'Shared engineering conventions (git clone)',
+  platforms: EVERYWHERE,
   requires: ['workspace'],
 
   async check() {
@@ -76,7 +78,7 @@ export const conventionsComponent: Component = {
 export const dailyReportComponent: Component = {
   id: 'daily-report',
   summary: 'Daily digest timer (systemd --user)',
-  linuxOnly: true,
+  platforms: ['linux'],
 
   async check() {
     const r = await run('systemctl', ['--user', 'is-enabled', 'circon-report.timer'])
@@ -104,6 +106,35 @@ export const dailyReportComponent: Component = {
   },
 }
 
+const LAUNCHD_LABEL = 'io.circon.agent'
+const launchdPlist = () => join(process.env['HOME'] ?? '', 'Library', 'LaunchAgents', `${LAUNCHD_LABEL}.plist`)
+const launchdDomain = () => `gui/${process.getuid?.() ?? 501}`
+
+function xml(text: string): string {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
+/** A LaunchAgent: started at login, restarted if it dies, PATH captured at install. */
+export function launchdPlistXml(bin: string, logDir: string, path: string): string {
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>${LAUNCHD_LABEL}</string>
+  <key>ProgramArguments</key>
+  <array><string>${xml(bin)}</string><string>agent</string></array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>30</integer>
+  <key>EnvironmentVariables</key>
+  <dict><key>PATH</key><string>${xml(path)}</string></dict>
+  <key>StandardOutPath</key><string>${xml(join(logDir, 'agent.log'))}</string>
+  <key>StandardErrorPath</key><string>${xml(join(logDir, 'agent.log'))}</string>
+</dict>
+</plist>
+`
+}
+
 /**
  * The agent daemon as a user service, so an enrolled runner comes back after a
  * reboot without anyone logging in.
@@ -120,12 +151,17 @@ export const dailyReportComponent: Component = {
  */
 export const agentServiceComponent: Component = {
   id: 'agent-service',
-  summary: 'Agent daemon at boot (systemd --user)',
-  linuxOnly: true,
+  summary: 'Agent daemon at boot (systemd --user, launchd on macOS)',
+  platforms: EVERYWHERE,
   requires: ['workspace'],
 
   async check() {
     if (!isEnrolled()) return ok('not enrolled — nothing to run')
+    if (currentPlatform() === 'darwin') {
+      if (!existsSync(launchdPlist())) return missing('LaunchAgent not installed')
+      const loaded = await run('launchctl', ['print', `${launchdDomain()}/${LAUNCHD_LABEL}`])
+      return loaded.ok && /state = running/.test(loaded.stdout) ? ok('running') : missing('installed but not running')
+    }
     const enabled = await run('systemctl', ['--user', 'is-enabled', 'circon-agent.service'])
     if (!enabled.ok) return missing('not enabled')
     // Enabled but dead is the failure that matters: jobs queue up and nothing
@@ -136,11 +172,24 @@ export const agentServiceComponent: Component = {
 
   async install() {
     if (!isEnrolled()) return
+    const bin = (await which('circon')) ?? 'circon'
+
+    if (currentPlatform() === 'darwin') {
+      // A LaunchAgent rather than a LaunchDaemon, for the same reason Linux uses
+      // a user unit: the agent needs this user's config, keychain, SDKs and
+      // simulators. launchd gives it no shell, so PATH is captured now.
+      mkdirSync(join(process.env['HOME'] ?? '', 'Library', 'LaunchAgents'), { recursive: true })
+      mkdirSync(paths.logs, { recursive: true })
+      writeFileSync(launchdPlist(), launchdPlistXml(bin, paths.logs, process.env['PATH'] ?? '/usr/bin:/bin'))
+      await run('launchctl', ['bootout', `${launchdDomain()}/${LAUNCHD_LABEL}`])
+      const loaded = await run('launchctl', ['bootstrap', launchdDomain(), launchdPlist()])
+      if (!loaded.ok) throw new Error(`launchctl bootstrap failed: ${loaded.stderr.trim()}`)
+      return
+    }
 
     const unitDir = join(process.env['HOME'] ?? '', '.config', 'systemd', 'user')
     mkdirSync(unitDir, { recursive: true })
 
-    const bin = (await which('circon')) ?? 'circon'
     // Restart=always with a delay: the daemon's own loop tolerates an
     // unreachable control plane, so a crash here means something unexpected and
     // retrying slowly is better than a restart loop burning the journal.
