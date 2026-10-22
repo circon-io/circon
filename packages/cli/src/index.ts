@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { parseArgs } from 'node:util'
 import { ui } from './core/ui.ts'
+import { loadCredentials } from './core/config.ts'
 import { doctorCommand } from './commands/doctor.ts'
 import { setupCommand } from './commands/setup.ts'
 
@@ -15,7 +16,7 @@ Machine
   circon setup [--upgrade]         install only what is missing (idempotent)
        --only <id>                 converge a single component
        --dry-run                   report what would change, change nothing
-  circon config                    set credentials (Anthropic, Telegram, RDP)
+  circon config                    set credentials and the conventions repository
   circon update                    pull the shared conventions repository
 
 Projects
@@ -35,6 +36,7 @@ Reporting
 
 async function main(argv: string[]): Promise<number> {
   const [command, ...rest] = argv
+  loadCredentials()
 
   if (!command || command === '--help' || command === '-h' || command === 'help') {
     console.log(USAGE)

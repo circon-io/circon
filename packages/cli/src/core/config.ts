@@ -102,6 +102,35 @@ export function writeEnvFile(name: string, values: Record<string, string>, heade
   chmodSync(file, 0o600)
 }
 
+/**
+ * Credential files the agent backends read from the environment. Project
+ * credentials (Cloudflare, Clerk…) are deliberately absent: the agent process
+ * must not hold a deploy token, and those are scoped per job instead.
+ */
+export const AGENT_CREDENTIALS = ['anthropic', 'openai'] as const
+
+/**
+ * Load credential files into `process.env` at startup. `circon config` writes
+ * them, and without this a run only worked if the user's shell happened to
+ * export the same keys. Variables already set win, so an explicit
+ * `ANTHROPIC_API_KEY=… circon run` still overrides the file.
+ */
+export function loadCredentials(
+  names: readonly string[] = AGENT_CREDENTIALS,
+  env: NodeJS.ProcessEnv = process.env,
+): string[] {
+  const loaded: string[] = []
+  for (const name of names) {
+    for (const [key, value] of Object.entries(readEnvFile(name))) {
+      if (env[key] === undefined && value) {
+        env[key] = value
+        loaded.push(key)
+      }
+    }
+  }
+  return loaded
+}
+
 export function hasCredentials(name: string, required: string[]): boolean {
   const env = readEnvFile(name)
   return required.every((key) => Boolean(env[key]))
