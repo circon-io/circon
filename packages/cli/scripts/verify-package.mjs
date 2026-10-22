@@ -17,6 +17,8 @@ const REQUIRED = [
   'templates/pnpm-workspace.yaml',
   'templates/.circon/flows/web.sh',
   'templates/.circon/flows/android.sh',
+  'templates/.circon/flows/ios.sh',
+  'templates/.circon/flows/lib.sh',
   'templates/.circon/expected-web.txt',
   'templates/.github/workflows/ci.yml',
   'templates/.github/workflows/deploy.yml',

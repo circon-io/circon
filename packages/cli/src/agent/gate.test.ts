@@ -226,7 +226,8 @@ describe('configured tiers', () => {
   test('the ios tier follows the configured mode, and passes it to the flow', async () => {
     const h = harness({ files: { '.circon/flows/ios.sh': '' } })
     assert.deepEqual((await runGate({ ...h, iosRunnerMode: 'none' })).ranTiers, [])
-    const r = await runGate({ ...h, iosRunnerMode: 'simulator' })
+    assert.deepEqual((await runGate({ ...h, iosRunnerMode: 'simulator', platform: 'linux' })).ranTiers, [], 'no simulator on Linux')
+    const r = await runGate({ ...h, iosRunnerMode: 'simulator', platform: 'darwin' })
     assert.deepEqual(r.ranTiers, ['ios UI'])
     assert.ok(h.calls.includes('bash .circon/flows/ios.sh simulator'))
   })

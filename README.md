@@ -206,9 +206,10 @@ projects connected through a GitHub App, runners, jobs, live logs and billing.
 
 ## Requirements
 
-Ubuntu 24.04+, an NVIDIA GPU, and enough disk for the Android SDK and CUDA.
-Developed against an RTX 3060. macOS runner support is planned; see
-[VISION.md](VISION.md).
+Ubuntu 24.04+ with an NVIDIA GPU (developed against an RTX 3060), or a Mac with
+Apple Silicon. On a Mac, Ollama runs on Metal, and iOS tests run on the
+simulator; install Xcode from the App Store first, since it can't be installed
+unattended. Either way, leave enough disk for the Android SDK.
 
 ## License
 

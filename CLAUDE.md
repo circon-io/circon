@@ -10,8 +10,9 @@ is the ordered work towards it.
 
 Two things with very different change rates, deliberately separated:
 
-- **`init.sh`** (~88 lines) — a bootstrap. Installs Node and `@circon/cli`, and
-  nothing else. It should stay this small.
+- **`init.sh`** (~110 lines) — a bootstrap for Ubuntu and macOS. Installs Node
+  and `@circon/cli` (and Homebrew on a Mac), and nothing else. It should stay
+  this small.
 - **`packages/cli`** — `@circon/cli`, a zero-runtime-dependency TypeScript CLI
   that converges the machine, runs the agent loop, and reports on it.
 
@@ -20,8 +21,8 @@ through 20 heredocs. That script could not be re-run (`snap install` aborted it
 under `set -e`), appended duplicate lines to `/etc/sysctl.conf` every run, and
 could only be updated by reprovisioning. The split is the fix.
 
-Target machine: Ubuntu with an NVIDIA GPU. The author develops from macOS over
-SSH and RDP.
+Target machines: Ubuntu with an NVIDIA GPU, or a Mac (Apple Silicon, Ollama on
+Metal). Every component declares its `platforms`; `doctor` skips the rest.
 
 ## Commands
 
@@ -216,5 +217,15 @@ Do not re-derive this. The iOS Simulator is macOS-only:
 - baguette is Apple Silicon only; Docker-OSX emulates Intel. Mutually exclusive,
   and Xcode 27 begins dropping Intel.
 
-So iOS is a pluggable stub: `iosRunnerMode` in `~/.config/circon/config.json`
-(`none | mac | device | vm`). Web and Android feedback need no Apple hardware.
+So iOS testing is `iosRunnerMode` (`none | simulator | device`), set per runner
+in the dashboard or `config.json`, and `.circon/flows/ios.sh` implements each:
+
+- `simulator` — a **macOS runner**, natively. The gate skips it on Linux rather
+  than failing, because that is a configuration mismatch, not bad code.
+- `device` on macOS — a cabled iPhone, built with Xcode, driven by agent-device.
+- `device` on Linux — the Codemagic `dev-client` IPA installed with go-ios;
+  WebDriverAgent opens it against the runner's Metro and serves the hierarchy.
+  agent-device drives physical iPhones through XCTest, which needs a Mac, so
+  this path does not use it.
+
+Web and Android feedback need no Apple hardware.

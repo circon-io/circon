@@ -188,14 +188,19 @@ local change.
 
 ## 6. Device testing and macOS runners
 
-- [ ] Boot the `circon_pixel` emulator when the gate needs a device, and reap it
+- [x] Boot the `circon_pixel` emulator when the gate needs a device, and reap it
       afterwards
-- [ ] `Component.platforms` with per-platform strategies, replacing `linuxOnly`
-- [ ] macOS: a Homebrew base, Ollama on Metal, the Android SDK for mac, an Xcode
+- [x] `Component.platforms` with per-platform strategies, replacing `linuxOnly`
+- [x] macOS: a Homebrew base, Ollama on Metal, the Android SDK for mac, an Xcode
       check, and launchd instead of systemd
-- [ ] `iosRunnerMode: none | simulator | device`, plus `.circon/flows/ios.sh`
-- [ ] Linux and a USB iPhone: a Codemagic dev-client IPA, installed with
+- [x] `iosRunnerMode: none | simulator | device`, plus `.circon/flows/ios.sh`
+- [x] Linux and a USB iPhone: a Codemagic dev-client IPA, installed with
       `go-ios`, with WebDriverAgent for the UI hierarchy
+- [ ] On real hardware: an Android emulator run on a Mac, a simulator run, and
+      a USB iPhone on Linux. The flows parse and the web flow ran end to end
+      locally, but no device flow has met a device yet
+- [ ] The daily report on macOS (launchd calendar interval); it is Linux-only
+      for now
 
 **The constraint, written here so it is not re-derived:**
 - The iOS Simulator is macOS-only.

@@ -39,6 +39,8 @@ export interface GateDeps {
   iosRunnerMode?: string
   /** Tiers this runner or project opted out of, e.g. android on a box with no KVM. */
   skipTiers?: string[]
+  /** Injected for tests; the simulator mode only exists on macOS. */
+  platform?: NodeJS.Platform
 }
 
 interface Tier {
@@ -111,8 +113,13 @@ export async function runGate(deps: GateDeps): Promise<GateResult> {
     },
     {
       name: 'ios UI',
-      applies: () =>
-        fileExists(flow('ios.sh')) && (deps.iosRunnerMode ?? readConfig().iosRunnerMode) !== 'none',
+      applies: () => {
+        const mode = deps.iosRunnerMode ?? readConfig().iosRunnerMode
+        if (!fileExists(flow('ios.sh')) || mode === 'none') return false
+        // A Linux runner configured for the simulator is a configuration
+        // mismatch, not a failure of the code; it must not cost the agent a strike.
+        return !(mode === 'simulator' && (deps.platform ?? process.platform) !== 'darwin')
+      },
       // The flow reads the mode to pick simulator or device.
       execute: () => exec('bash', [flow('ios.sh'), deps.iosRunnerMode ?? readConfig().iosRunnerMode], cwd),
     },

@@ -19,3 +19,5 @@ apps/mobile/ios
 # circon
 .circon/*.log
 .circon/.last-verified
+.circon/*.fingerprint
+.circon/ios-dev-client.ipa
