@@ -114,9 +114,12 @@ export async function authenticateHumanDetailed(
     const sub = typeof payload.sub === 'string' ? payload.sub : null
     if (!sub) return { principal: null, failure: 'no_subject' }
 
-    // Clerk puts the active organization in `org_id`; fall back to the user so
-    // a personal account still has a stable tenant key.
-    const org = typeof payload['org_id'] === 'string' ? payload['org_id'] : sub
+    // The active organization: `o.id` in Clerk's v2 session tokens, `org_id` in
+    // v1. Fall back to the user so a personal account still has a stable tenant
+    // key — reading only `org_id` silently put v2 org members in their own tenant.
+    const o = (payload['o'] ?? {}) as { id?: unknown }
+    const org =
+      typeof o.id === 'string' ? o.id : typeof payload['org_id'] === 'string' ? payload['org_id'] : sub
     const email = typeof payload['email'] === 'string' ? payload['email'] : undefined
     return { principal: { kind: 'human', id: sub, org, ...(email ? { email } : {}) } }
   } catch (error) {
