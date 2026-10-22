@@ -26,6 +26,8 @@ export interface RunSummary {
   gateTiers: string[]
   costUsd: number
   logPath: string
+  /** The run's page in the dashboard, when this runner is enrolled. */
+  runUrl?: string
 }
 
 const SHOT_DIR = join(projectPaths.dir, 'screenshots')
@@ -62,7 +64,12 @@ export function existingScreenshots(cwd: string): string[] {
 export function prBody(summary: RunSummary, screenshots: string[]): string {
   const lines: string[] = []
 
-  lines.push('Opened automatically by `circon run`.', '')
+  lines.push(
+    summary.runUrl
+      ? `Opened automatically by \`circon run\` — [watch this run in the dashboard](${summary.runUrl}).`
+      : 'Opened automatically by `circon run`.',
+    '',
+  )
 
   if (summary.tasksCompleted.length) {
     lines.push('## Tasks completed', '')

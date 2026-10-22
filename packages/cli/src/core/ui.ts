@@ -9,32 +9,48 @@ function paint(style: Style, text: string): string {
   return useColor ? styleText(style, text) : text
 }
 
+/**
+ * A second destination for every line the CLI prints, uncolored. A dispatched
+ * run points it at the dashboard, so the log there reads like the terminal.
+ */
+let sink: ((line: string) => void) | null = null
+
+export function setOutputSink(next: ((line: string) => void) | null): void {
+  sink = next
+}
+
+function out(line: string, plain: string = line): void {
+  console.log(line)
+  sink?.(plain)
+}
+
 export const ui = {
   heading(text: string): void {
-    console.log('')
-    console.log(paint(['bold'], text))
-    console.log(paint(['dim'], '─'.repeat(Math.min(text.length, 60))))
+    out('')
+    out(paint(['bold'], text), text)
+    out(paint(['dim'], '─'.repeat(Math.min(text.length, 60))), '─'.repeat(Math.min(text.length, 60)))
   },
   info(text: string): void {
-    console.log(text)
+    out(text)
   },
   step(text: string): void {
-    console.log(`${paint(['cyan'], '→')} ${text}`)
+    out(`${paint(['cyan'], '→')} ${text}`, `→ ${text}`)
   },
   ok(text: string): void {
-    console.log(`${paint(['green'], '✓')} ${text}`)
+    out(`${paint(['green'], '✓')} ${text}`, `✓ ${text}`)
   },
   warn(text: string): void {
-    console.log(`${paint(['yellow'], '!')} ${text}`)
+    out(`${paint(['yellow'], '!')} ${text}`, `! ${text}`)
   },
   error(text: string): void {
     console.error(`${paint(['red'], '✗')} ${text}`)
+    sink?.(`✗ ${text}`)
   },
   dim(text: string): void {
-    console.log(paint(['dim'], text))
+    out(paint(['dim'], text), text)
   },
   blank(): void {
-    console.log('')
+    out('')
   },
   /** Left-aligned columns; widths derived from content. */
   table(rows: string[][]): void {
@@ -52,7 +68,7 @@ export const ui = {
           return i === row.length - 1 ? cell : cell + ' '.repeat(pad)
         })
         .join('  ')
-      console.log(line.trimEnd())
+      out(line.trimEnd(), stripAnsi(line).trimEnd())
     }
   },
   label: {

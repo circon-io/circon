@@ -2,9 +2,9 @@ import { existsSync, readFileSync, appendFileSync, writeFileSync, mkdirSync } fr
 import { join, basename } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import { run, which } from '../core/exec.ts'
-import { ui } from '../core/ui.ts'
+import { ui, setOutputSink } from '../core/ui.ts'
 import { paths, projectPaths } from '../core/paths.ts'
-import { readConfig } from '../core/config.ts'
+import { effectiveConfig, type RunConfig } from '../core/config.ts'
 import { runGate } from '../agent/gate.ts'
 import { AndroidEmulator } from '../agent/emulator.ts'
 import { Repo } from '../agent/git.ts'
@@ -19,8 +19,9 @@ import {
 } from '../agent/review.ts'
 import { collect } from './gc.ts'
 import {
-  reportRun, cloneCredential, requestPullRequest, type RunRecord,
+  reportRun, cloneCredential, requestPullRequest, fetchConfig, isEnrolled, type RunRecord,
 } from '../agent/control-plane.ts'
+import { silentChannel, type RunChannel } from '../agent/channel.ts'
 
 const STUCK_LIMIT = 3
 const INFRA_RETRY_LIMIT = 5
@@ -40,19 +41,29 @@ function notesSince(cwd: string, startLines: number): string {
     .join('\n')
 }
 
+/** What the dashboard changed while the run was going; read at iteration boundaries. */
+export interface RefreshSignals {
+  take(): { config: boolean; prd: boolean }
+}
+
 export interface RunOptions {
   /**
    * Set when the control plane dispatched this run, so the job can be closed
    * when it ends. Absent for a run started by hand.
    */
   jobId?: string
+  /** The job's config snapshot (org < runner < project), resolved at claim time. */
+  config?: RunConfig
+  /** Where progress and output go besides the terminal: the dashboard, for a dispatched run. */
+  channel?: RunChannel
+  refresh?: RefreshSignals
 }
 
 export async function runCommand(maxLoops = 20, opts: RunOptions = {}): Promise<number> {
   const cwd = process.cwd()
   const project = basename(cwd)
-  const cfg = readConfig()
   const repo = new Repo(cwd)
+  const channel = opts.channel ?? silentChannel
 
   if (!(await repo.isRepo())) {
     ui.error('Not a git repository. Run circon from a project root.')
@@ -74,6 +85,12 @@ export async function runCommand(maxLoops = 20, opts: RunOptions = {}): Promise<
     return 1
   }
   clearStop()
+
+  // An enrolled runner fetches its settings even for a dispatched run: the job
+  // carries the config, but the dashboard URL for the PR comes from here.
+  const settings = isEnrolled() ? await fetchConfig(project) : null
+  let cfg = effectiveConfig(opts.config ?? settings?.config)
+  setOutputSink((line) => channel.log(`${line}\n`))
 
   // Declared out here so the finally can report even an aborted run: a record
   // left at 'running' is worse than one marked failed, because nothing ever
@@ -153,6 +170,7 @@ export async function runCommand(maxLoops = 20, opts: RunOptions = {}): Promise<
     // runId. Unenrolled runners get `false` and carry on.
     report = { runId: `run_${randomBytes(9).toString('hex')}`, projectSlug: project, branch, ...(opts.jobId ? { jobId: opts.jobId } : {}) }
     await reportRun(report)
+    channel.started({ runId: report.runId, project, branch })
 
     const completed: ReturnType<typeof readTasks> = []
     let commits = 0
@@ -164,6 +182,17 @@ export async function runCommand(maxLoops = 20, opts: RunOptions = {}): Promise<
     let ended: 'complete' | 'stopped' | 'budget' | 'limit' = 'limit'
 
     for (let i = 1; i <= maxLoops; i++) {
+      // Dashboard edits land here, between iterations, never inside one.
+      const changed = opts.refresh?.take() ?? { config: false, prd: false }
+      if (changed.config) {
+        cfg = effectiveConfig((await fetchConfig(project)).config)
+        budget.setCaps(cfg.budgetPerRunUsd, cfg.budgetPerDayUsd)
+        ui.info('Config changed in the dashboard — applied from this iteration.')
+      }
+      if (changed.prd && (await repo.syncFileFromBase(base, 'PRD.md'))) {
+        ui.info(`PRD.md changed on ${base} — synced into this run.`)
+      }
+
       if (stopRequested()) {
         ended = 'stopped'
         ui.warn('Stop requested — ending cleanly between iterations.')
@@ -194,6 +223,7 @@ export async function runCommand(maxLoops = 20, opts: RunOptions = {}): Promise<
       }
 
       ui.heading(`Iteration ${i}/${maxLoops}`)
+      channel.progress({ runId: report.runId, project, branch, iteration: i, costUsd: budget.total })
       const openBefore = openTasks(cwd)
       if (openBefore.length === 0) {
         ended = 'complete'
@@ -228,7 +258,7 @@ export async function runCommand(maxLoops = 20, opts: RunOptions = {}): Promise<
           '--yes-always',
           '--no-auto-commits',
         ],
-        { cwd, stream: true },
+        { cwd, stream: true, onOutput: (chunk) => channel.log(chunk) },
       )
       const aiderOut = aiderRun.stdout + aiderRun.stderr
       appendFileSync(runLog, aiderOut)
@@ -237,8 +267,14 @@ export async function runCommand(maxLoops = 20, opts: RunOptions = {}): Promise<
       if (cost !== null) budget.add('aider', cost)
 
       ui.step('Running the quality gate…')
-      const gate = await runGate({ cwd, ensureAndroidDevice })
+      const gate = await runGate({
+        cwd,
+        ensureAndroidDevice,
+        iosRunnerMode: cfg.iosRunnerMode,
+        skipTiers: cfg.skipTiers,
+      })
       appendFileSync(runLog, gate.output)
+      channel.log(gate.output)
       if (gate.ranTiers.length) {
         gateTiers = gate.ranTiers
         ui.dim(`tiers: ${gate.ranTiers.join(' → ')} · ${budget.summary()}`)
@@ -336,6 +372,7 @@ export async function runCommand(maxLoops = 20, opts: RunOptions = {}): Promise<
       gateTiers,
       costUsd: budget.total,
       logPath: runLog,
+      ...(settings?.dashboardUrl ? { runUrl: `${settings.dashboardUrl}/runs/${report.runId}` } : {}),
     }
 
     let prUrl: string | null = null
@@ -388,7 +425,14 @@ export async function runCommand(maxLoops = 20, opts: RunOptions = {}): Promise<
       // No outcome means something threw. Recording that is the point.
       report.outcome ??= 'aborted'
       await reportRun(report)
+      channel.finished({
+        runId: report.runId,
+        outcome: report.outcome,
+        costUsd: report.costUsd ?? 0,
+        ...(report.prUrl ? { prUrl: report.prUrl } : {}),
+      })
     }
+    setOutputSink(null)
     releaseLock()
     clearStop()
   }

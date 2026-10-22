@@ -14,6 +14,8 @@ export interface RunOptions {
   stream?: boolean
   timeoutMs?: number
   input?: string
+  /** Called with each chunk as it arrives, e.g. to stream it to the dashboard. */
+  onOutput?: (chunk: string) => void
 }
 
 /**
@@ -42,11 +44,13 @@ export function run(cmd: string, args: string[], opts: RunOptions = {}): Promise
       const s = d.toString()
       stdout += s
       if (opts.stream) process.stdout.write(s)
+      opts.onOutput?.(s)
     })
     child.stderr?.on('data', (d: Buffer) => {
       const s = d.toString()
       stderr += s
       if (opts.stream) process.stderr.write(s)
+      opts.onOutput?.(s)
     })
 
     if (opts.input) {

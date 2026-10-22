@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync, chmodSync } from 'node:fs'
 import { join } from 'node:path'
 import { paths } from '../core/paths.ts'
+import type { RunConfig } from '../core/config.ts'
 
 /**
  * The runner's half of the control plane.
@@ -18,15 +19,6 @@ export interface Enrollment {
   org: string
   name: string
   enrolledAt: string
-}
-
-export interface RemoteConfig {
-  budgetPerRunUsd?: number
-  budgetPerDayUsd?: number
-  verifyEvery?: number
-  verifyModel?: string
-  gateTiers?: string[]
-  iosRunnerMode?: 'none' | 'mac' | 'device' | 'vm'
 }
 
 const ENROLLMENT = () => join(paths.config, 'enrollment.json')
@@ -111,41 +103,58 @@ export async function enroll(
   }
 }
 
-/**
- * Per-runner config, with the last good copy as a fallback.
- *
- * Precedence is dashboard-first so "why is this runner behaving differently"
- * stays answerable, but the cache means a control-plane outage degrades to the
- * previous settings rather than to nothing.
- */
-export async function fetchConfig(): Promise<{ config: RemoteConfig; stale: boolean }> {
-  const enrollment = readEnrollment()
-  if (!enrollment) return { config: {}, stale: false }
+export interface RemoteSettings {
+  /** Org defaults with this runner's overrides; a job's snapshot also adds the project's. */
+  config: RunConfig
+  /** Where the dashboard lives, so a PR can link to its run. */
+  dashboardUrl: string | null
+  /** True when this is the cached copy because the control plane was unreachable. */
+  stale: boolean
+}
 
-  const fresh = (await request(enrollment, '/api/runner/config')) as
-    | { config?: RemoteConfig }
+/**
+ * Org and runner config, with the last good copy as a fallback.
+ *
+ * Plaintext on purpose: config holds no secrets. The cache means a
+ * control-plane outage degrades to the previous settings rather than to
+ * nothing, which is what keeps a runner usable while the service is down.
+ */
+export async function fetchConfig(project?: string): Promise<RemoteSettings> {
+  const enrollment = readEnrollment()
+  if (!enrollment) return { config: {}, dashboardUrl: null, stale: false }
+
+  const path = project ? `/api/runner/config?project=${encodeURIComponent(project)}` : '/api/runner/config'
+  const fresh = (await request(enrollment, path)) as
+    | { config?: RunConfig; dashboardUrl?: string | null }
     | null
 
   if (fresh?.config) {
+    const settings = { config: fresh.config, dashboardUrl: fresh.dashboardUrl ?? null }
     mkdirSync(paths.state, { recursive: true })
-    writeFileSync(CONFIG_CACHE(), `${JSON.stringify(fresh.config, null, 2)}\n`)
-    return { config: fresh.config, stale: false }
+    writeFileSync(CONFIG_CACHE(), `${JSON.stringify(settings, null, 2)}\n`)
+    return { ...settings, stale: false }
   }
 
   if (existsSync(CONFIG_CACHE())) {
     try {
-      return { config: JSON.parse(readFileSync(CONFIG_CACHE(), 'utf8')) as RemoteConfig, stale: true }
+      const cached = JSON.parse(readFileSync(CONFIG_CACHE(), 'utf8')) as {
+        config?: RunConfig
+        dashboardUrl?: string | null
+      }
+      return { config: cached.config ?? {}, dashboardUrl: cached.dashboardUrl ?? null, stale: true }
     } catch {
       /* fall through */
     }
   }
-  return { config: {}, stale: true }
+  return { config: {}, dashboardUrl: null, stale: true }
 }
 
 export interface QueuedJob {
   id: string
   projectSlug: string
   maxLoops: number
+  /** The whole run config (org < runner < project), resolved at claim time. */
+  config?: RunConfig
 }
 
 export async function claimJob(): Promise<QueuedJob | null> {
@@ -168,6 +177,8 @@ export interface RunRecord {
   prUrl?: string
   failedTier?: string
   jobId?: string
+  /** Which backend and model filled each role, for the run view. */
+  agents?: Record<string, { backend: string; model?: string }>
 }
 
 export async function reportRun(record: RunRecord): Promise<boolean> {

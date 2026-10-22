@@ -215,3 +215,19 @@ describe('android device provisioning', () => {
     assert.equal(r.ok, true)
   })
 })
+
+describe('configured tiers', () => {
+  test('a skipped tier never runs, even when its files are present', async () => {
+    const h = harness({ files: { 'package.json': '{"scripts":{"test":"vitest"}}', '.circon/flows/web.sh': '' }, binaries: ['agent-device'] })
+    const r = await runGate({ ...h, skipTiers: ['web UI'] })
+    assert.deepEqual(r.ranTiers, ['unit tests'])
+  })
+
+  test('the ios tier follows the configured mode, and passes it to the flow', async () => {
+    const h = harness({ files: { '.circon/flows/ios.sh': '' } })
+    assert.deepEqual((await runGate({ ...h, iosRunnerMode: 'none' })).ranTiers, [])
+    const r = await runGate({ ...h, iosRunnerMode: 'simulator' })
+    assert.deepEqual(r.ranTiers, ['ios UI'])
+    assert.ok(h.calls.includes('bash .circon/flows/ios.sh simulator'))
+  })
+})

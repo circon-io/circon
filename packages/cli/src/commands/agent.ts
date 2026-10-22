@@ -2,14 +2,19 @@ import { hostname } from 'node:os'
 import { ui } from '../core/ui.ts'
 import { readEnrollment, claimJob, socketUrl, fetchConfig } from '../agent/control-plane.ts'
 import { readLock, requestStop } from '../agent/lock.ts'
+import { BatchedChannel, type Outbound } from '../agent/channel.ts'
+import { currentRef } from '../core/conventions.ts'
 import { jobCommand } from './job.ts'
+import { cliVersion } from './update.ts'
+import type { RefreshSignals } from './run.ts'
 
 /**
  * The long-lived runner process.
  *
- * Two jobs: hold a socket open so the dashboard can see this machine and stop
- * it, and poll for queued work. It must survive a control-plane outage — a
- * runner that dies because a service blipped is worse than no daemon at all.
+ * It holds a socket open so the dashboard can see this machine, stream its
+ * runs and stop them, and it claims queued work. It must survive a
+ * control-plane outage — a runner that dies because a service blipped is worse
+ * than no daemon at all.
  */
 
 const HEARTBEAT_MS = 30_000
@@ -17,6 +22,37 @@ const CLAIM_INTERVAL_MS = 15_000
 
 function backoff(attempt: number): number {
   return Math.min(5_000 * 2 ** Math.max(0, attempt - 1), 120_000)
+}
+
+type Inbound =
+  | { type: 'command'; command: 'stop' | 'run' }
+  | { type: 'config-changed' }
+  | { type: 'prd-changed'; project: string }
+
+/**
+ * Changes the dashboard made while a run was going. The loop takes them at its
+ * next iteration boundary, so nothing changes under an iteration in flight.
+ */
+export class PendingRefresh implements RefreshSignals {
+  private config = false
+  private prd = false
+  private readonly project: () => string | null
+
+  constructor(project: () => string | null) {
+    this.project = project
+  }
+
+  note(message: Inbound): void {
+    if (message.type === 'config-changed') this.config = true
+    if (message.type === 'prd-changed' && message.project === this.project()) this.prd = true
+  }
+
+  take(): { config: boolean; prd: boolean } {
+    const taken = { config: this.config, prd: this.prd }
+    this.config = false
+    this.prd = false
+    return taken
+  }
 }
 
 export async function agentCommand(): Promise<number> {
@@ -35,7 +71,52 @@ export async function agentCommand(): Promise<number> {
 
   let attempt = 0
   let socket: WebSocket | null = null
-  let running = false
+  let running: string | null = null
+  let stopping = false
+
+  const send = (message: Outbound | Record<string, unknown>): void => {
+    // Dropped while disconnected: the run log on disk is the record, the
+    // dashboard view is live-only.
+    if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message))
+  }
+
+  const hello = async () => {
+    send({
+      type: 'hello',
+      cliVersion: cliVersion(),
+      platform: `${process.platform} ${hostname()}`,
+      conventionsRef: (await currentRef()) ?? undefined,
+    })
+  }
+
+  const refresh = new PendingRefresh(() => running)
+
+  const claimNow = async () => {
+    if (running || readLock() || stopping) return
+    const job = await claimJob()
+    if (!job) return
+
+    running = job.projectSlug
+    ui.step(`Claimed job ${job.id} — ${job.projectSlug}`)
+    const channel = new BatchedChannel(send)
+    try {
+      await jobCommand(job.projectSlug, {
+        maxLoops: job.maxLoops,
+        jobId: job.id,
+        ...(job.config ? { config: job.config } : {}),
+        channel,
+        refresh,
+      })
+    } catch (error) {
+      ui.error(`Job failed: ${error instanceof Error ? error.message : String(error)}`)
+    } finally {
+      channel.close()
+      running = null
+      refresh.take()
+      // The job may have moved the conventions to another tag.
+      await hello()
+    }
+  }
 
   const connect = () => {
     socket = new WebSocket(socketUrl(enrollment), [])
@@ -43,32 +124,37 @@ export async function agentCommand(): Promise<number> {
     socket.addEventListener('open', () => {
       attempt = 0
       ui.ok('Connected.')
-      socket?.send(JSON.stringify({
-        type: 'hello',
-        cliVersion: process.env['npm_package_version'] ?? 'unknown',
-        platform: `${process.platform} ${hostname()}`,
-      }))
+      void hello()
     })
 
     socket.addEventListener('message', (event) => {
-      let message: { type?: string; command?: string }
+      let message: Inbound
       try {
-        message = JSON.parse(String(event.data)) as { type?: string; command?: string }
+        message = JSON.parse(String(event.data)) as Inbound
       } catch {
         return
       }
-      // Stop is honoured by writing the flag the loop checks between
-      // iterations — never by killing the process mid-commit.
+
       if (message.type === 'command' && message.command === 'stop') {
+        // Honored by writing the flag the loop checks between iterations —
+        // never by killing the process mid-commit.
         const lock = readLock()
         if (lock) {
           requestStop()
           ui.warn(`Stop requested for ${lock.project} from the dashboard.`)
         }
+        return
       }
+      if (message.type === 'command' && message.command === 'run') {
+        // A nudge to claim now. What to run still comes from the queue.
+        void claimNow()
+        return
+      }
+      refresh.note(message)
     })
 
     socket.addEventListener('close', () => {
+      if (stopping) return
       attempt++
       const wait = backoff(attempt)
       ui.warn(`Disconnected. Reconnecting in ${wait / 1000}s…`)
@@ -83,37 +169,21 @@ export async function agentCommand(): Promise<number> {
   connect()
 
   const heartbeat = setInterval(() => {
-    if (socket?.readyState !== WebSocket.OPEN) return
+    // While a run is going it reports its own progress, which carries more.
+    if (running) return
     const lock = readLock()
-    socket.send(JSON.stringify({
+    send({
       type: 'heartbeat',
-      state: lock
-        ? { status: 'running', project: lock.project }
-        : { status: 'idle' },
-    }))
+      state: lock ? { status: 'running', project: lock.project } : { status: 'idle' },
+    })
   }, HEARTBEAT_MS)
 
-  const poll = setInterval(() => {
-    void (async () => {
-      if (running || readLock()) return
-      const job = await claimJob()
-      if (!job) return
-
-      running = true
-      ui.step(`Claimed job ${job.id} — ${job.projectSlug}`)
-      try {
-        await jobCommand(job.projectSlug, { maxLoops: job.maxLoops, jobId: job.id })
-      } catch (error) {
-        ui.error(`Job failed: ${error instanceof Error ? error.message : String(error)}`)
-      } finally {
-        running = false
-      }
-    })()
-  }, CLAIM_INTERVAL_MS)
+  const poll = setInterval(() => void claimNow(), CLAIM_INTERVAL_MS)
 
   // Runs until killed by systemd or Ctrl-C.
   await new Promise<void>((resolve) => {
     const shutdown = () => {
+      stopping = true
       clearInterval(heartbeat)
       clearInterval(poll)
       socket?.close()

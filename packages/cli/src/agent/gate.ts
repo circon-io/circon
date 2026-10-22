@@ -35,6 +35,10 @@ export interface GateDeps {
    * Without it the tier runs only when a device is already attached.
    */
   ensureAndroidDevice?: () => Promise<boolean>
+  /** From the run's effective config; read from config.json when absent. */
+  iosRunnerMode?: string
+  /** Tiers this runner or project opted out of, e.g. android on a box with no KVM. */
+  skipTiers?: string[]
 }
 
 interface Tier {
@@ -108,15 +112,18 @@ export async function runGate(deps: GateDeps): Promise<GateResult> {
     {
       name: 'ios UI',
       applies: () =>
-        fileExists(flow('ios.sh')) && readConfig().iosRunnerMode !== 'none',
-      execute: () => exec('bash', [flow('ios.sh')], cwd),
+        fileExists(flow('ios.sh')) && (deps.iosRunnerMode ?? readConfig().iosRunnerMode) !== 'none',
+      // The flow reads the mode to pick simulator or device.
+      execute: () => exec('bash', [flow('ios.sh'), deps.iosRunnerMode ?? readConfig().iosRunnerMode], cwd),
     },
   ]
 
   const ran: TierName[] = []
   let output = ''
 
+  const skipped = new Set(deps.skipTiers ?? [])
   for (const tier of tiers) {
+    if (skipped.has(tier.name)) continue
     if (!(await tier.applies())) continue
     ran.push(tier.name)
     const result = await tier.execute()

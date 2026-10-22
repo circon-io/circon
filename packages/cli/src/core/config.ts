@@ -9,55 +9,91 @@ import { paths } from './paths.ts'
  *  - *.env        credentials, written 0600, never logged
  */
 
-export interface Config {
-  conventionsRepo?: string
-  /** Branch the agent commits to; your PRD edits stay on main. */
-  workBranch?: string
-  verifyEvery?: number
-  verifyModel?: string
-  verifyBudgetUsd?: number
+export type IosRunnerMode = 'none' | 'simulator' | 'device'
+export type AgentBackendId = 'aider' | 'claude-code' | 'codex'
+export type AgentRole = 'plan' | 'build' | 'review'
+
+export interface RoleSpec {
+  backend: AgentBackendId
+  model?: string
+  /** aider only: the cheap model that applies the architect's edits. */
+  editorModel?: string
+}
+
+/**
+ * Settings that shape a run. The dashboard edits these too (org, runner and
+ * project layers), so the shape matches the control plane's `RunConfig`.
+ */
+export interface RunConfig {
   /** 0 means no limit. */
   budgetPerRunUsd?: number
   budgetPerDayUsd?: number
-  reportHour?: number
-  iosRunnerMode?: 'none' | 'mac' | 'device' | 'vm'
+  verifyEvery?: number
+  verifyBudgetUsd?: number
+  iosRunnerMode?: IosRunnerMode
+  /** Gate tiers not to run here, e.g. on a runner without KVM. */
+  skipTiers?: string[]
+  /** `plan: null` turns a planning step inherited from a lower layer off. */
+  agents?: Partial<Record<AgentRole, RoleSpec | null>>
 }
 
-const DEFAULTS: Required<
-  Pick<
-    Config,
-    | 'workBranch'
-    | 'verifyEvery'
-    | 'verifyModel'
-    | 'verifyBudgetUsd'
-    | 'budgetPerRunUsd'
-    | 'budgetPerDayUsd'
-    | 'iosRunnerMode'
-  >
-> = {
-  workBranch: 'circon/work',
+/** Machine-local settings: everything a run uses, plus what only this machine needs. */
+export interface Config extends RunConfig {
+  conventionsRepo?: string
+  /** Model for the review pass. Superseded by `agents.review`, still honored. */
+  verifyModel?: string
+}
+
+const DEFAULTS = {
   verifyEvery: 5,
   verifyModel: 'sonnet',
   verifyBudgetUsd: 0.5,
   // Conservative defaults: a runaway loop is capped before it is noticed.
   budgetPerRunUsd: 10,
   budgetPerDayUsd: 40,
-  iosRunnerMode: 'none',
+  iosRunnerMode: 'none' as IosRunnerMode,
+  skipTiers: [] as string[],
 }
+
+export type ResolvedConfig = Config & typeof DEFAULTS
 
 const configFile = () => join(paths.config, 'config.json')
 
-export function readConfig(): Config & typeof DEFAULTS {
-  let stored: Config = {}
-  if (existsSync(configFile())) {
-    try {
-      stored = JSON.parse(readFileSync(configFile(), 'utf8')) as Config
-    } catch {
-      // A malformed config must not brick the CLI; fall back to defaults.
-      stored = {}
+function readStored(): Config {
+  if (!existsSync(configFile())) return {}
+  try {
+    const stored = JSON.parse(readFileSync(configFile(), 'utf8')) as Config & { iosRunnerMode?: string }
+    // `mac` and `vm` were stubs that never worked; read them as off.
+    if (stored.iosRunnerMode && !['none', 'simulator', 'device'].includes(stored.iosRunnerMode)) {
+      stored.iosRunnerMode = 'none'
     }
+    return stored as Config
+  } catch {
+    // A malformed config must not brick the CLI; fall back to defaults.
+    return {}
   }
-  return { ...DEFAULTS, ...stored }
+}
+
+export function readConfig(): ResolvedConfig {
+  return { ...DEFAULTS, ...readStored() }
+}
+
+/**
+ * The config a run actually uses: defaults < local config.json < the control
+ * plane's snapshot (org < runner < project, already merged server-side).
+ *
+ * Only keys a layer sets override, and agents merge role by role, so a project
+ * that only picks a build model still inherits the org's reviewer.
+ */
+export function effectiveConfig(remote?: RunConfig | null, local: Config = readStored()): ResolvedConfig {
+  const merged: ResolvedConfig = { ...DEFAULTS, ...local }
+  if (!remote) return merged
+  const { agents, ...rest } = remote
+  for (const [key, value] of Object.entries(rest)) {
+    if (value !== undefined) (merged as unknown as Record<string, unknown>)[key] = value
+  }
+  if (agents) merged.agents = { ...(local.agents ?? {}), ...agents }
+  return merged
 }
 
 export function writeConfig(update: Config): void {

@@ -3,7 +3,8 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { loadCredentials, writeEnvFile } from './config.ts'
+import { loadCredentials, writeEnvFile, effectiveConfig, readConfig } from './config.ts'
+import { writeFileSync, mkdirSync } from 'node:fs'
 
 let home = ''
 const previousHome = process.env['CIRCON_HOME']
@@ -45,5 +46,36 @@ describe('loading credentials', () => {
     const env: NodeJS.ProcessEnv = {}
     loadCredentials(undefined, env)
     assert.equal(env['CLOUDFLARE_API_TOKEN'], undefined)
+  })
+})
+
+describe('effective config', () => {
+  test('with nothing remote, local settings win over defaults', () => {
+    const cfg = effectiveConfig(null, { budgetPerRunUsd: 3 })
+    assert.equal(cfg.budgetPerRunUsd, 3)
+    assert.equal(cfg.verifyEvery, 5)
+  })
+
+  test('the dashboard snapshot overrides only what it sets', () => {
+    const cfg = effectiveConfig({ budgetPerRunUsd: 2 }, { budgetPerRunUsd: 3, budgetPerDayUsd: 7 })
+    assert.equal(cfg.budgetPerRunUsd, 2)
+    assert.equal(cfg.budgetPerDayUsd, 7)
+  })
+
+  test('agents merge role by role', () => {
+    const cfg = effectiveConfig(
+      { agents: { build: { backend: 'claude-code', model: 'opus' } } },
+      { agents: { build: { backend: 'aider' }, review: { backend: 'codex' } } },
+    )
+    assert.deepEqual(cfg.agents, {
+      build: { backend: 'claude-code', model: 'opus' },
+      review: { backend: 'codex' },
+    })
+  })
+
+  test('the retired ios modes read as off', () => {
+    mkdirSync(join(home, '.config', 'circon'), { recursive: true })
+    writeFileSync(join(home, '.config', 'circon', 'config.json'), JSON.stringify({ iosRunnerMode: 'vm' }))
+    assert.equal(readConfig().iosRunnerMode, 'none')
   })
 })

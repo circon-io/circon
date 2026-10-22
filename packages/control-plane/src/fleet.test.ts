@@ -181,6 +181,14 @@ describe('configuration', () => {
     assert.equal(got.dashboardUrl, 'https://app.example.test')
   })
 
+  test('naming a project layers its config on top, as a claim would', async () => {
+    const { env } = setup()
+    await putSettings(post({ config: { verifyEvery: 3 } }), env, ORG, 'user')
+    await putProjectConfig(post({ config: { verifyEvery: 9 } }), env, ORG, 'prj_acme__shop')
+    const got = await data<{ config: unknown }>(await runnerConfig(env, 'run_a', ORG, 'acme__shop'))
+    assert.deepEqual(got.config, { verifyEvery: 9 })
+  })
+
   test("another org's project config cannot be written", async () => {
     const { env } = setup()
     const res = await putProjectConfig(post({ config: { verifyEvery: 2 } }), env, 'org_other', 'prj_acme__shop')

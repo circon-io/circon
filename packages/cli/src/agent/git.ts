@@ -99,17 +99,19 @@ export class Repo {
   }
 
   /**
-   * The PRD task that just flipped to done, read from the staged diff, so the
-   * commit subject names the work instead of "completed automated task".
+   * Take one file as it is on the remote base branch and commit it here.
+   *
+   * This is how a PRD edited on `main` reaches a running loop. It is a plain
+   * checkout, not a merge, which is safe only because the agent never writes
+   * that file: there is nothing on this branch for the human's version to
+   * conflict with. Returns whether anything changed.
    */
-  async completedTaskFromDiff(prdFile = 'PRD.md'): Promise<string | null> {
-    const r = await this.git('diff', '--cached', '-U0', '--', prdFile)
-    if (!r.ok) return null
-    for (const line of r.stdout.split('\n')) {
-      const m = line.match(/^\+- \[[xX]\]\s*(.+)$/)
-      if (m?.[1]) return m[1].trim()
-    }
-    return null
+  async syncFileFromBase(base: string, file: string): Promise<boolean> {
+    if (!(await this.hasRemote())) return false
+    if (!(await this.git('fetch', '--quiet', 'origin', base)).ok) return false
+    if (!(await this.git('checkout', `origin/${base}`, '--', file)).ok) return false
+    if (!(await this.hasStagedChanges())) return false
+    return this.commit(`chore: sync ${file} from ${base}`)
   }
 
   /** Commit subjects produced by this run only. */

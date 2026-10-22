@@ -82,8 +82,8 @@ export function usd(amount: number): string {
 export class RunBudget {
   private spent = 0
   private readonly project: string
-  private readonly perRun: number
-  private readonly perDay: number
+  private perRun: number
+  private perDay: number
 
   constructor(project: string, perRun: number, perDay: number) {
     this.project = project
@@ -100,6 +100,12 @@ export class RunBudget {
       }
     }
     return null
+  }
+
+  /** New caps from a config change mid-run; what was already spent still counts. */
+  setCaps(perRun: number, perDay: number): void {
+    this.perRun = perRun
+    this.perDay = perDay
   }
 
   add(source: string, amount: number): void {

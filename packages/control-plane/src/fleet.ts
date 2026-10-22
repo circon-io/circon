@@ -213,12 +213,22 @@ async function projectConfig(env: Env, org: string, slug: string): Promise<RunCo
 }
 
 /**
- * What a runner uses outside a dispatched job: org defaults with its own
- * overrides. The dashboard URL rides along so a PR can link to its run.
+ * Org defaults with the runner's own overrides, plus a project's when one is
+ * named: exactly what a claim resolves, so a mid-run refresh matches what the
+ * run started with. The dashboard URL rides along so a PR can link its run.
  */
-export async function runnerConfig(env: Env, runnerId: string, org: string): Promise<Response> {
+export async function runnerConfig(
+  env: Env,
+  runnerId: string,
+  org: string,
+  project?: string | null,
+): Promise<Response> {
   return ok({
-    config: mergeConfigs(await orgConfig(env, org), await storedRunnerConfig(env, runnerId)),
+    config: mergeConfigs(
+      await orgConfig(env, org),
+      await storedRunnerConfig(env, runnerId),
+      project ? await projectConfig(env, org, project) : null,
+    ),
     dashboardUrl: env.DASHBOARD_ORIGIN ?? null,
   })
 }

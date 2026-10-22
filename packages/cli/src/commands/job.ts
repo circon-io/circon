@@ -5,7 +5,9 @@ import { run } from '../core/exec.ts'
 import { ui } from '../core/ui.ts'
 import { Repo } from '../agent/git.ts'
 import { readLock } from '../agent/lock.ts'
-import { runCommand } from './run.ts'
+import { runCommand, type RunOptions } from './run.ts'
+import { resolve as resolveConventions } from '../core/conventions.ts'
+import { cliVersion } from './update.ts'
 import { cloneCredential } from '../agent/control-plane.ts'
 import {
   configureCredentialHelper, credentialFlags, slugToHttps,
@@ -56,7 +58,7 @@ export function isValidSlug(slug: string): boolean {
   )
 }
 
-export interface JobOptions {
+export interface JobOptions extends Omit<RunOptions, 'jobId'> {
   maxLoops?: number
   /** Explicit remote, for a host other than github.com or a fork. */
   remote?: string
@@ -142,12 +144,20 @@ export async function jobCommand(slug: string | undefined, opts: JobOptions = {}
     if (!pulled.ok) ui.warn(`Could not fast-forward ${base}; running against the local copy.`)
   }
 
+  // The conventions are the contract for this run, so they are pinned once,
+  // here, and never move under it. Resolution picks the newest tag this CLI can
+  // satisfy; failure keeps whatever is checked out.
+  const conventions = await resolveConventions(cliVersion())
+  if (conventions.warning) ui.warn(`Conventions: ${conventions.warning}`)
+  else if (conventions.ref) ui.dim(`Conventions ${conventions.ref}`)
+
   // runCommand works on process.cwd(), so move there rather than threading a
   // directory through every call site.
+  const { maxLoops, remote: _remote, ...runOptions } = opts
   const previous = process.cwd()
   try {
     process.chdir(dir)
-    return await runCommand(opts.maxLoops ?? 20, opts.jobId ? { jobId: opts.jobId } : {})
+    return await runCommand(maxLoops ?? 20, runOptions)
   } finally {
     process.chdir(previous)
   }

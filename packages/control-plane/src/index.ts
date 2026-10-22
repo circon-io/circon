@@ -106,7 +106,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
       if (path === '/api/runner/config' && request.method === 'GET') {
         const principal = await authenticateRunner(request, env)
         if (!principal) return unauthorized()
-        return await runnerConfig(env, principal.id, principal.org)
+        return await runnerConfig(env, principal.id, principal.org, url.searchParams.get('project'))
       }
 
       if (path === '/api/runner/claim' && request.method === 'POST') {
