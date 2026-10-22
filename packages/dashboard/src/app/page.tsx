@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Chip, Spinner } from '@heroui/react'
 import { AppShell } from '@/components/app-shell'
+import { Onboarding } from '@/components/onboarding'
 import { RunnerCard } from '@/components/runner-card'
 import { EnrollRunner } from '@/components/enroll-runner'
 import { QueueJob } from '@/components/queue-job'
@@ -65,6 +66,8 @@ export default function DashboardPage() {
         )
       }
     >
+
+      {!loading && <Onboarding runners={runners} runs={runs} />}
 
       {error && (
         <p className="text-small text-danger" role="alert" data-testid="error">

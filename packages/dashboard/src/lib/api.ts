@@ -123,6 +123,75 @@ export function useApi() {
   )
 }
 
+export interface Project {
+  id: string
+  slug: string
+  status: string
+  default_branch: string
+  account_login: string | null
+  integration_revoked: string | null
+  latest_plan: number | null
+  approved_plan: number | null
+}
+
+export interface PlanSummary {
+  id: string
+  version: number
+  status: 'draft' | 'approved' | 'superseded'
+  source: 'generated' | 'refined' | 'edited'
+  prompt: string | null
+  model: string | null
+  created_at: string
+  approved_at: string | null
+  commit_sha: string | null
+  pr_url: string | null
+}
+
+export interface PlanCheck {
+  ok: boolean
+  errors: string[]
+  tasks: string[]
+}
+
+/**
+ * POST and read a server-sent event stream. A fetch body rather than
+ * EventSource, because EventSource cannot send the Authorization header.
+ */
+export function useEventStream() {
+  const { getToken } = useAuth()
+  return useCallback(
+    async (path: string, body: unknown, onEvent: (event: string, data: Record<string, unknown>) => void) => {
+      const token = await getToken()
+      const res = await fetch(`${BASE}${path}`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${token ?? ''}`, 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      if (!res.ok || !res.body) {
+        const err = (await res.json().catch(() => ({}))) as { error?: { code?: string; message?: string } }
+        throw new ApiError(err.error?.code ?? 'request_failed', err.error?.message ?? `Request failed (${res.status})`)
+      }
+      const reader = res.body.pipeThrough(new TextDecoderStream()).getReader()
+      let buffer = ''
+      for (;;) {
+        const { value, done } = await reader.read()
+        if (done) break
+        buffer += value
+        let split = buffer.indexOf('\n\n')
+        while (split >= 0) {
+          const block = buffer.slice(0, split)
+          buffer = buffer.slice(split + 2)
+          const event = /^event: (.+)$/m.exec(block)?.[1]
+          const data = /^data: (.+)$/m.exec(block)?.[1]
+          if (event && data) onEvent(event, JSON.parse(data) as Record<string, unknown>)
+          split = buffer.indexOf('\n\n')
+        }
+      }
+    },
+    [getToken],
+  )
+}
+
 export function controlPlaneUrl(): string {
   return BASE
 }

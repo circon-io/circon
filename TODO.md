@@ -92,13 +92,13 @@ vendor that does not share the first one's blind spots.
 
 ## 3. Idea → plan → approval
 
-- [ ] Dashboard: describe what to build. The control plane generates a PRD with
+- [x] Dashboard: describe what to build. The control plane generates a PRD with
       our model key, capped per plan
-- [ ] Refine through chat or direct edits. Every change is a version, with a diff
-- [ ] Approve: `PRD.md` is committed to the default branch, or a PR is opened if
+- [x] Refine through chat or direct edits. Every change is a version, with a diff
+- [x] Approve: `PRD.md` is committed to the default branch, or a PR is opened if
       the branch is protected
-- [ ] First job on an empty repository: `circon init --here` scaffolds into it
-- [ ] Onboarding stepper: Connect → Describe → Plan → Runner → Build
+- [x] First job on an empty repository: `circon init --here` scaffolds into it
+- [x] Onboarding stepper: Connect → Describe → Plan → Runner → Build
 
 **Why the control plane and not the runner:** in the intended flow, the plan
 comes *before* a runner is connected. The cost sits with us, so the number of

@@ -118,7 +118,9 @@ export async function listAvailableRepos(
 export async function listProjects(env: Env, org: string): Promise<Response> {
   const rows = await env.DB.prepare(
     `SELECT p.id, p.slug, p.status, p.default_branch, p.created_at,
-            i.account_login, i.provider, i.revoked_at AS integration_revoked
+            i.account_login, i.provider, i.revoked_at AS integration_revoked,
+            (SELECT MAX(version) FROM plans WHERE project_id = p.id) AS latest_plan,
+            (SELECT MAX(version) FROM plans WHERE project_id = p.id AND status = 'approved') AS approved_plan
      FROM projects p JOIN integrations i ON i.id = p.integration_id
      WHERE p.org = ?1 ORDER BY p.created_at`,
   )
@@ -184,6 +186,8 @@ export async function createProject(
 }
 
 export async function deleteProject(env: Env, org: string, projectId: string): Promise<Response> {
+  // Plans belong to the project; the repository keeps the approved PRD.md.
+  await env.DB.prepare('DELETE FROM plans WHERE project_id = ?1 AND org = ?2').bind(projectId, org).run()
   const result = await env.DB.prepare('DELETE FROM projects WHERE id = ?1 AND org = ?2')
     .bind(projectId, org)
     .run()

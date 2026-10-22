@@ -2,22 +2,14 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { Button, CardContent, CardHeader, CardRoot, CardTitle, Chip, Spinner } from '@heroui/react'
-import { useApi } from '@/lib/api'
+import NextLink from 'next/link'
+import { useApi, type Project } from '@/lib/api'
 
 interface Integration {
   id: string
   provider: string
   account_login: string | null
   revoked_at: string | null
-}
-
-interface Project {
-  id: string
-  slug: string
-  status: string
-  default_branch: string
-  account_login: string | null
-  integration_revoked: string | null
 }
 
 interface Repo {
@@ -153,7 +145,20 @@ export function Projects({ onChanged }: { onChanged: () => void }) {
                 key={project.id}
                 className="flex flex-wrap items-center gap-3 rounded-md border border-default-200 px-3 py-2"
               >
-                <span className="font-mono text-sm">{project.slug.replace('__', '/')}</span>
+                <NextLink
+                  href={`/projects/${project.id}`}
+                  className="font-mono text-sm underline"
+                  data-testid={`project-${project.id}`}
+                >
+                  {project.slug.replace('__', '/')}
+                </NextLink>
+                <span className="text-sm text-default-500">
+                  {project.approved_plan
+                    ? `plan v${project.approved_plan} approved`
+                    : project.latest_plan
+                      ? `plan v${project.latest_plan} in draft`
+                      : 'no plan yet'}
+                </span>
                 <Chip
                   size="sm"
                   color={project.status === 'active' && !project.integration_revoked ? 'success' : 'warning'}
