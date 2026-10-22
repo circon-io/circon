@@ -1,11 +1,15 @@
 'use client'
 
+import NextLink from 'next/link'
 import { Chip, Link } from '@heroui/react'
 import { ago, money, type Run } from '@/lib/api'
 
-const OUTCOME_COLOR: Record<string, 'success' | 'danger' | 'warning' | 'accent' | 'default'> = {
+export const OUTCOME_COLOR: Record<string, 'success' | 'danger' | 'warning' | 'accent' | 'default'> = {
   complete: 'success',
   failed: 'danger',
+  stuck: 'danger',
+  aborted: 'danger',
+  infrastructure: 'warning',
   budget: 'warning',
   stopped: 'default',
   running: 'accent',
@@ -13,7 +17,7 @@ const OUTCOME_COLOR: Record<string, 'success' | 'danger' | 'warning' | 'accent' 
 
 /**
  * A plain table rather than HeroUI's collection component: this is a flat list
- * with no selection, sorting or virtualisation, and the collection API buys
+ * with no selection, sorting or virtualization, and the collection API buys
  * nothing for it.
  */
 export function RunsTable({ runs }: { runs: Run[] }) {
@@ -41,7 +45,11 @@ export function RunsTable({ runs }: { runs: Run[] }) {
         <tbody>
           {runs.map((run) => (
             <tr key={run.id} className="border-t border-default-200">
-              <td className="px-3 py-2">{run.project_slug}</td>
+              <td className="px-3 py-2">
+                <NextLink href={`/runs/${run.id}`} className="underline" data-testid={`run-${run.id}`}>
+                  {run.project_slug.replace('__', '/')}
+                </NextLink>
+              </td>
               <td className="px-3 py-2">
                 <Chip size="sm" color={OUTCOME_COLOR[run.outcome ?? 'running'] ?? 'default'}>
                   {run.outcome ?? 'running'}
@@ -53,7 +61,7 @@ export function RunsTable({ runs }: { runs: Run[] }) {
               <td className="px-3 py-2">
                 {run.pr_url ? (
                   <Link href={run.pr_url} target="_blank" rel="noreferrer">
-                    PR
+                    PR{run.pr_state ? ` · ${run.pr_state}` : ''}
                   </Link>
                 ) : run.failed_tier ? (
                   <span className="text-default-400">failed: {run.failed_tier}</span>

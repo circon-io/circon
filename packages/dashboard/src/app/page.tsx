@@ -1,8 +1,8 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import { UserButton } from '@clerk/nextjs'
 import { Chip, Spinner } from '@heroui/react'
+import { AppShell } from '@/components/app-shell'
 import { RunnerCard } from '@/components/runner-card'
 import { EnrollRunner } from '@/components/enroll-runner'
 import { QueueJob } from '@/components/queue-job'
@@ -21,22 +21,24 @@ export default function DashboardPage() {
   // Bumped when a project is connected or removed, to remount the queue form's list.
   const [projectEpoch, setProjectEpoch] = useState(0)
 
-  const refresh = useCallback(async () => {
-    try {
-      const [runnerData, runData] = await Promise.all([
+  // A promise chain rather than try/await: state is only ever set from the
+  // callbacks, which is what lets an effect call this without cascading renders.
+  const refresh = useCallback(
+    () =>
+      Promise.all([
         api<{ runners: Runner[] }>('/api/runners'),
         api<{ runs: Run[]; spentLast24h: number }>('/api/runs?limit=25'),
       ])
-      setRunners(runnerData.runners)
-      setRuns(runData.runs)
-      setSpend(runData.spentLast24h)
-      setError(null)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not reach the control plane')
-    } finally {
-      setLoading(false)
-    }
-  }, [api])
+        .then(([runnerData, runData]) => {
+          setRunners(runnerData.runners)
+          setRuns(runData.runs)
+          setSpend(runData.spentLast24h)
+          setError(null)
+        })
+        .catch((e: unknown) => setError(e instanceof Error ? e.message : 'Could not reach the control plane'))
+        .finally(() => setLoading(false)),
+    [api],
+  )
 
   useEffect(() => {
     void refresh()
@@ -49,10 +51,9 @@ export default function DashboardPage() {
   const online = runners.filter((r) => r.state?.status !== 'offline').length
 
   return (
-    <main className="mx-auto flex max-w-5xl flex-col gap-6 p-6">
-      <header className="flex flex-wrap items-center gap-3">
-        <h1 className="text-xl font-semibold">circon</h1>
-        {!loading && (
+    <AppShell
+      actions={
+        !loading && (
           <>
             <Chip size="sm" data-testid="runner-count">
               {runners.length} runner{runners.length === 1 ? '' : 's'}, {online} online
@@ -61,11 +62,9 @@ export default function DashboardPage() {
               {money(spend)} last 24h
             </Chip>
           </>
-        )}
-        <div className="ml-auto">
-          <UserButton />
-        </div>
-      </header>
+        )
+      }
+    >
 
       {error && (
         <p className="text-small text-danger" role="alert" data-testid="error">
@@ -99,13 +98,13 @@ export default function DashboardPage() {
 
       <div className="grid gap-4 md:grid-cols-2">
         <EnrollRunner onEnrolled={() => void refresh()} />
-        <QueueJob key={projectEpoch} onQueued={() => void refresh()} />
+        <QueueJob key={projectEpoch} runners={runners} onQueued={() => void refresh()} />
       </div>
 
       <section className="flex flex-col gap-3">
         <h2 className="text-medium font-medium">Recent runs</h2>
         <RunsTable runs={runs} />
       </section>
-    </main>
+    </AppShell>
   )
 }

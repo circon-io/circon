@@ -44,21 +44,23 @@ export function Projects({ onChanged }: { onChanged: () => void }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  const load = useCallback(async () => {
-    try {
-      const [i, p] = await Promise.all([
+  // A promise chain rather than try/await: state is only ever set from the
+  // callbacks, which is what lets an effect call this without cascading renders.
+  const load = useCallback(
+    () =>
+      Promise.all([
         api<{ integrations: Integration[] }>('/api/integrations'),
         api<{ projects: Project[] }>('/api/projects'),
       ])
-      setIntegrations(i.integrations)
-      setProjects(p.projects)
-      setError(null)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not load projects')
-    } finally {
-      setLoading(false)
-    }
-  }, [api])
+        .then(([i, p]) => {
+          setIntegrations(i.integrations)
+          setProjects(p.projects)
+          setError(null)
+        })
+        .catch((e: unknown) => setError(e instanceof Error ? e.message : 'Could not load projects'))
+        .finally(() => setLoading(false)),
+    [api],
+  )
 
   useEffect(() => {
     void load()

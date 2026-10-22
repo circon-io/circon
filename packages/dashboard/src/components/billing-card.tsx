@@ -25,13 +25,15 @@ export function BillingCard() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const load = useCallback(async () => {
-    try {
-      setBilling(await api<Billing>('/api/billing'))
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not load billing')
-    }
-  }, [api])
+  // A promise chain rather than try/await: state is only ever set from the
+  // callbacks, which is what lets an effect call this without cascading renders.
+  const load = useCallback(
+    () =>
+      api<Billing>('/api/billing')
+        .then(setBilling)
+        .catch((e: unknown) => setError(e instanceof Error ? e.message : 'Could not load billing')),
+    [api],
+  )
 
   useEffect(() => {
     void load()

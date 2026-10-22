@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { Button, CardContent, CardHeader, CardRoot, CardTitle } from '@heroui/react'
-import { useApi } from '@/lib/api'
+import { useApi, type Runner } from '@/lib/api'
 
 interface QueueableProject {
   id: string
@@ -12,35 +12,39 @@ interface QueueableProject {
 }
 
 /**
- * Queue work for whichever runner is free.
+ * Queue work for whichever runner is free, or for one in particular.
  *
  * The project is chosen from the connected repositories rather than typed: a slug
  * the control plane has no project for cannot be cloned, and a typo used to
  * surface as a runner-side clone failure minutes later.
  */
-export function QueueJob({ onQueued }: { onQueued: () => void }) {
+export function QueueJob({ onQueued, runners }: { onQueued: () => void; runners: Runner[] }) {
   const api = useApi()
   const [projects, setProjects] = useState<QueueableProject[]>([])
   const [slug, setSlug] = useState('')
+  const [runnerId, setRunnerId] = useState('')
   const [loops, setLoops] = useState('20')
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
 
-  const load = useCallback(async () => {
-    try {
-      const { projects: rows } = await api<{ projects: QueueableProject[] }>('/api/projects')
-      const runnable = rows.filter((p) => p.status === 'active' && !p.integration_revoked)
-      setProjects(runnable)
-      // Preselect only when there is no ambiguity.
-      setSlug((current) =>
-        current && runnable.some((p) => p.slug === current)
-          ? current
-          : (runnable.length === 1 ? runnable[0]!.slug : ''),
-      )
-    } catch {
-      /* the page-level error banner already covers an unreachable control plane */
-    }
-  }, [api])
+  const load = useCallback(
+    () =>
+      api<{ projects: QueueableProject[] }>('/api/projects')
+        .then(({ projects: rows }) => {
+          const runnable = rows.filter((p) => p.status === 'active' && !p.integration_revoked)
+          setProjects(runnable)
+          // Preselect only when there is no ambiguity.
+          setSlug((current) =>
+            current && runnable.some((p) => p.slug === current)
+              ? current
+              : (runnable.length === 1 ? runnable[0]!.slug : ''),
+          )
+        })
+        .catch(() => {
+          /* the page-level error banner already covers an unreachable control plane */
+        }),
+    [api],
+  )
 
   useEffect(() => {
     void load()
@@ -55,9 +59,15 @@ export function QueueJob({ onQueued }: { onQueued: () => void }) {
         body: JSON.stringify({
           projectSlug: slug,
           maxLoops: Number.parseInt(loops, 10) || 20,
+          ...(runnerId ? { runnerId } : {}),
         }),
       })
-      setMessage('Queued. The next idle runner will claim it.')
+      const target = runners.find((r) => r.id === runnerId)
+      setMessage(
+        target
+          ? `Queued for ${target.name}.${target.state?.status === 'offline' ? ' It is offline, so it starts when it reconnects.' : ''}`
+          : 'Queued. The next idle runner will claim it.',
+      )
       onQueued()
     } catch (e) {
       setMessage(e instanceof Error ? e.message : 'Could not queue the job')
@@ -91,6 +101,23 @@ export function QueueJob({ onQueued }: { onQueued: () => void }) {
                 {projects.map((project) => (
                   <option key={project.id} value={project.slug}>
                     {project.slug.replace('__', '/')}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="text-default-600">Runner</span>
+              <select
+                value={runnerId}
+                onChange={(e) => setRunnerId(e.target.value)}
+                aria-label="Runner"
+                data-testid="job-runner"
+                className="rounded-md border border-default-300 bg-transparent px-3 py-1.5 text-sm outline-none focus:border-default-500"
+              >
+                <option value="">Any idle runner</option>
+                {runners.map((runner) => (
+                  <option key={runner.id} value={runner.id}>
+                    {runner.name} ({runner.state?.status ?? 'offline'})
                   </option>
                 ))}
               </select>
