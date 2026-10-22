@@ -40,6 +40,7 @@ type Outbound =
   | { type: 'command'; command: 'stop' | 'run' }
   | { type: 'config-changed' }
   | { type: 'prd-changed'; project: string }
+  | { type: 'secrets-changed'; project: string }
 
 export class RunnerDO extends DurableObject<Env> {
   private logs: string[] = []

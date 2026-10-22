@@ -12,8 +12,9 @@ import { entitlementFor, countRunners, hasFeature } from './billing/entitlements
 import {
   belongsTo, enroll, createEnrollToken, listRunners, runnerConfig, commandRunner,
   getSettings, putSettings, putRunnerConfig, getProjectConfig, putProjectConfig,
-  claimJob, queueJob, recordRun, listRuns, getRun,
+  claimJob, queueJob, recordRun, listRuns, getRun, overview,
 } from './fleet.ts'
+import { createRequest, listRequests, fulfillRequest, dismissRequest } from './requests.ts'
 import { listPlans, getPlan, editPlan, streamPlan, approvePlan } from './planning/routes.ts'
 import { releaseReport, approveRelease } from './releases.ts'
 import { listSecrets, putSecret, deleteSecret, secretsForJob } from './secrets.ts'
@@ -137,6 +138,12 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
         return await secretsForJob(env, principal.id, principal.org, url.searchParams.get('job') ?? '')
       }
 
+      if (path === '/api/runner/requests' && request.method === 'POST') {
+        const principal = await authenticateRunner(request, env)
+        if (!principal) return unauthorized()
+        return await createRequest(request, env, principal.org)
+      }
+
       if (path === '/api/runner/run' && request.method === 'POST') {
         const principal = await authenticateRunner(request, env)
         if (!principal) return unauthorized()
@@ -152,6 +159,18 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
 
         const segment = (n: number) => decodeURIComponent(path.split('/')[n] ?? '')
 
+        if (path === '/api/overview' && request.method === 'GET') {
+          return await overview(env, principal.org)
+        }
+        if (path === '/api/requests' && request.method === 'GET') {
+          return await listRequests(env, principal.org, url)
+        }
+        if (/^\/api\/requests\/[^/]+\/fulfill$/.test(path) && request.method === 'POST') {
+          return await fulfillRequest(request, env, principal.org, principal.id, segment(3))
+        }
+        if (/^\/api\/requests\/[^/]+\/dismiss$/.test(path) && request.method === 'POST') {
+          return await dismissRequest(env, principal.org, principal.id, segment(3))
+        }
         if (path === '/api/runners' && request.method === 'GET') {
           return await listRunners(env, principal.org)
         }

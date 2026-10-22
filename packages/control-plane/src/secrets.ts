@@ -124,6 +124,17 @@ export async function putSecret(request: Request, env: Env, org: string, userId:
   if (scope === 'project' && !(await projectBelongs(env, org, projectId))) return fail('not_found', 'No such project.', 404)
   if (!env.SECRETS_MASTER_KEY) return fail('not_configured', 'SECRETS_MASTER_KEY is not set on the API Worker.', 503)
 
+  await store(env, { org, scope, projectId, name, userId }, value)
+  return ok({ name, scope })
+}
+
+/** Seal and upsert one value. */
+async function store(
+  env: Env,
+  where: { org: string; scope: SecretScope; projectId: string; name: string; userId: string },
+  value: string,
+): Promise<void> {
+  const { org, scope, projectId, name, userId } = where
   const sealed = await seal(env, { org, scope, projectId, name }, value)
   await env.DB.prepare(
     `INSERT INTO secrets (id, org, scope, project_id, name, ciphertext, iv, updated_at, updated_by)
@@ -134,7 +145,24 @@ export async function putSecret(request: Request, env: Env, org: string, userId:
   )
     .bind(id('sec'), org, scope, projectId, name, sealed.ciphertext, sealed.iv, nowIso(), userId)
     .run()
-  return ok({ name, scope })
+}
+
+/** For answering an agent's request: a project secret, validated like any other. Null on success. */
+export async function putProjectSecret(
+  env: Env,
+  org: string,
+  userId: string,
+  projectId: string,
+  name: string,
+  value: string,
+): Promise<Response | null> {
+  const nameProblem = validSecretName(name)
+  if (nameProblem) return fail('invalid_name', nameProblem)
+  if (!value || value.length > MAX_VALUE) return fail('invalid_value', 'A value between 1 byte and 32 KB is required.')
+  if (!(await projectBelongs(env, org, projectId))) return fail('not_found', 'No such project.', 404)
+  if (!env.SECRETS_MASTER_KEY) return fail('not_configured', 'SECRETS_MASTER_KEY is not set on the API Worker.', 503)
+  await store(env, { org, scope: 'project', projectId, name, userId }, value)
+  return null
 }
 
 export async function deleteSecret(env: Env, org: string, secretId: string): Promise<Response> {

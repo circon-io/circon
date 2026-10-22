@@ -12,6 +12,9 @@ import { sanitizeConfig, mergeConfigs, parseStoredConfig, type RunConfig } from 
  * against a real SQLite, without the Durable Object runtime.
  */
 
+/** The gate's feedback loops, cheapest first. */
+export const GATE_TIERS = ['typecheck', 'unit tests', 'web UI', 'android UI', 'ios UI']
+
 /** A claimed job whose runner has not been seen for this long is put back. */
 export const DARK_RUNNER_MS = 10 * 60_000
 
@@ -20,6 +23,7 @@ export type RunnerMessage =
   | { type: 'command'; command: 'run' }
   | { type: 'config-changed' }
   | { type: 'prd-changed'; project: string }
+  | { type: 'secrets-changed'; project: string }
 
 function runnerStub(env: Env, runnerId: string) {
   return env.RUNNER.get(env.RUNNER.idFromName(runnerId))
@@ -470,6 +474,7 @@ export async function recordRun(
     jobId?: string
     agents?: unknown
     screenshots?: unknown
+    gateTiers?: unknown
   } | null
 
   if (!body?.runId || !body.projectSlug) {
@@ -492,10 +497,15 @@ export async function recordRun(
     ? body.screenshots.filter((s): s is string => typeof s === 'string' && /^https:\/\/github\.com\//.test(s)).slice(0, 12)
     : []
 
+  const tiers = Array.isArray(body.gateTiers)
+    ? body.gateTiers.filter((t): t is string => typeof t === 'string' && GATE_TIERS.includes(t))
+    : []
+
   await env.DB.prepare(
     `INSERT INTO runs (id, runner_id, org, job_id, project_slug, branch, started_at, finished_at,
-                       outcome, iterations, commits, cost_usd, pr_url, failed_tier, agents, screenshots)
-     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
+                       outcome, iterations, commits, cost_usd, pr_url, failed_tier, agents, screenshots,
+                       gate_tiers)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
      ON CONFLICT (id) DO UPDATE SET
        finished_at = excluded.finished_at,
        outcome     = excluded.outcome,
@@ -505,7 +515,8 @@ export async function recordRun(
        pr_url      = excluded.pr_url,
        failed_tier = excluded.failed_tier,
        agents      = COALESCE(excluded.agents, runs.agents),
-       screenshots = COALESCE(excluded.screenshots, runs.screenshots)
+       screenshots = COALESCE(excluded.screenshots, runs.screenshots),
+       gate_tiers  = COALESCE(excluded.gate_tiers, runs.gate_tiers)
      WHERE runs.runner_id = excluded.runner_id`,
   )
     .bind(
@@ -515,6 +526,7 @@ export async function recordRun(
       body.costUsd ?? 0, body.prUrl ?? null, body.failedTier ?? null,
       body.agents ? JSON.stringify(body.agents) : null,
       screenshots.length ? JSON.stringify(screenshots) : null,
+      tiers.length ? JSON.stringify(tiers) : null,
     )
     .run()
 
@@ -535,7 +547,7 @@ export async function listRuns(env: Env, org: string, url: URL): Promise<Respons
 
   const rows = await env.DB.prepare(
     `SELECT id, runner_id, job_id, project_slug, branch, started_at, finished_at, outcome,
-            iterations, commits, cost_usd, pr_url, pr_state, failed_tier
+            iterations, commits, cost_usd, pr_url, pr_state, failed_tier, gate_tiers
      FROM runs
      WHERE org = ?1 AND started_at >= ?2 AND (?3 IS NULL OR project_slug = ?3)
      ORDER BY started_at DESC LIMIT ?4`,
@@ -550,7 +562,7 @@ export async function listRuns(env: Env, org: string, url: URL): Promise<Respons
     .bind(org, new Date(Date.now() - 86_400_000).toISOString())
     .first<{ total: number }>()
 
-  return ok({ runs: rows.results ?? [], spentLast24h: spend?.total ?? 0 })
+  return ok({ runs: (rows.results ?? []).map(withTiers), spentLast24h: spend?.total ?? 0 })
 }
 
 /** One run, plus the runner's live state when this is the run it is on now. */
@@ -580,5 +592,64 @@ export async function getRun(env: Env, org: string, runId: string): Promise<Resp
     agents = null
   }
 
-  return ok({ run: { ...run, agents }, live })
+  return ok({ run: withTiers({ ...run, agents }), live })
+}
+
+function withTiers(row: Record<string, unknown>): Record<string, unknown> {
+  let tiers: unknown = []
+  try {
+    tiers = typeof row['gate_tiers'] === 'string' ? JSON.parse(row['gate_tiers']) : []
+  } catch {
+    tiers = []
+  }
+  return { ...row, gate_tiers: tiers }
+}
+
+/**
+ * Everything the overview shows in one request: what is running, what it has
+ * cost, how runs have been going, and what is waiting on a human.
+ */
+export async function overview(env: Env, org: string): Promise<Response> {
+  const week = new Date(Date.now() - 7 * 86_400_000).toISOString()
+  const day = new Date(Date.now() - 86_400_000).toISOString()
+  const month = new Date(Date.now() - 30 * 86_400_000).toISOString()
+
+  const outcomes = await env.DB.prepare(
+    `SELECT outcome, COUNT(*) AS n FROM runs WHERE org = ?1 AND started_at >= ?2 GROUP BY outcome`,
+  )
+    .bind(org, week)
+    .all<{ outcome: string; n: number }>()
+  const spend = await env.DB.prepare(
+    `SELECT COALESCE(SUM(CASE WHEN started_at >= ?2 THEN cost_usd END), 0) AS day,
+            COALESCE(SUM(cost_usd), 0) AS month
+     FROM runs WHERE org = ?1 AND started_at >= ?3`,
+  )
+    .bind(org, day, month)
+    .first<{ day: number; month: number }>()
+  const requests = await env.DB.prepare(
+    `SELECT COUNT(*) AS n FROM secret_requests WHERE org = ?1 AND status = 'pending'`,
+  )
+    .bind(org)
+    .first<{ n: number }>()
+  const drafts = await env.DB.prepare(
+    `SELECT COUNT(*) AS n FROM projects p
+     WHERE p.org = ?1 AND EXISTS (SELECT 1 FROM plans WHERE project_id = p.id)
+       AND NOT EXISTS (SELECT 1 FROM plans WHERE project_id = p.id AND status = 'approved')`,
+  )
+    .bind(org)
+    .first<{ n: number }>()
+
+  const byOutcome = Object.fromEntries((outcomes.results ?? []).map((r) => [r.outcome, r.n]))
+  const finished = Object.entries(byOutcome).filter(([o]) => o !== 'running').reduce((s, [, n]) => s + n, 0)
+  const succeeded = (byOutcome['complete'] ?? 0) + (byOutcome['limit'] ?? 0) + (byOutcome['stopped'] ?? 0)
+
+  return ok({
+    runsLast7d: Object.values(byOutcome).reduce((s, n) => s + n, 0),
+    running: byOutcome['running'] ?? 0,
+    successRate7d: finished ? succeeded / finished : null,
+    spentLast24h: spend?.day ?? 0,
+    spentLast30d: spend?.month ?? 0,
+    pendingRequests: requests?.n ?? 0,
+    plansAwaitingApproval: drafts?.n ?? 0,
+  })
 }
