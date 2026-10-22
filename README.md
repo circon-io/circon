@@ -43,7 +43,7 @@ control plane open, reports heartbeats and live logs, and claims queued jobs.
 
 | | |
 |---|---|
-| **AI** | Ollama + `qwen2.5-coder:7b`, aider, Claude Code with the context7 MCP |
+| **AI** | Ollama + `qwen2.5-coder:7b`, aider, Claude Code (with the context7 MCP), OpenAI Codex |
 | **GPU** | NVIDIA drivers, CUDA toolkit, Ollama flash attention |
 | **Mobile** | Node 24, pnpm, Expo tooling, Android Studio, a headless Android SDK and a ready emulator |
 | **Containers** | Docker Engine, plus KVM for hardware-accelerated emulation |
@@ -111,7 +111,8 @@ circon run            # or: circon run 50   to raise the iteration cap
 ```
 
 Each iteration runs the same steps:
-1. The agent implements exactly one open task from `PRD.md`.
+1. The agent implements exactly one open task from `PRD.md`, optionally after a
+   separate planning step.
 2. The quality gate runs.
 3. If the gate passes, the change is committed. If it fails, the change is
    reverted.
@@ -134,8 +135,34 @@ and `accessibilityLabel`. List the labels a screen must expose in
 `.circon/expected-web.txt`, and the gate fails any iteration where one is
 missing.
 
-Every 5 iterations, and after any failure, Claude Code reviews the accumulated
+Every 5 iterations, and after any failure, a reviewer looks over the accumulated
 diff for correctness and security. Its findings go into the agent's next prompt.
+
+### Agents and models per role
+
+Planning, building and reviewing are separate roles. Each one can use a
+different backend (`aider`, `claude-code` or `codex`) and a different model. You
+set them per organization, runner or project in the dashboard, or in
+`config.json`:
+
+```json
+{
+  "agents": {
+    "plan":   { "backend": "claude-code", "model": "fable" },
+    "build":  { "backend": "claude-code", "model": "opus" },
+    "review": { "backend": "codex" }
+  }
+}
+```
+
+With nothing set, aider builds (Sonnet as architect, local Qwen as editor) and
+Claude Code reviews.
+
+Claude Code and Codex can run on the subscriptions you already have (`claude
+setup-token`, `codex login --device-auth`), and their usage is recorded but never
+counted against your budget caps. When a subscription's usage window runs out,
+the loop waits for the reset instead of failing. `circon doctor` shows whether
+each agent can run, and who pays for it.
 
 **iOS** is controlled by `iosRunnerMode` in `~/.config/circon/config.json`. Web
 and Android feedback need no Apple hardware. [CLAUDE.md](CLAUDE.md) explains why

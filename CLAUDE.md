@@ -102,6 +102,30 @@ if a `requires` names something unknown or declared later.
   snapshot in the job (`control-plane/src/config.ts` and `core/config.ts` must
   agree on the shape).
 
+### Agent backends and roles
+
+`src/agent/backends/`. A run has three roles — `plan` (optional), `build`,
+`review` — and each is filled by a backend (`aider`, `claude-code`, `codex`) and
+a model, from `agents` in the layered config. With nothing configured the loop
+is what it always was: aider builds (Sonnet architect, local Qwen editor),
+Claude Code reviews.
+
+- **Backends never commit.** Claude Code is denied `git commit/push/reset`;
+  Codex runs in a `workspace-write` sandbox. The loop commits only what passed
+  the gate, which is what keeps `reset --hard` meaningful.
+- **Subscription vs API.** In `-p` mode Claude Code always bills an
+  `ANTHROPIC_API_KEY` when one is present, so when subscription credentials
+  exist (`CLAUDE_CODE_OAUTH_TOKEN` or a claude.ai login) the key is *unset* in
+  Claude's environment (`exec`'s `unsetEnv`). Subscription cost is recorded as
+  `notional` in the ledger and never counts against a cap.
+- **A usage limit is not a failure.** `limits.ts` recognizes the CLIs' limit
+  messages — only in a *failed* call's output, so an agent building a rate
+  limiter is not mistaken for one. The loop discards the partial edit and waits
+  for the reset (checking for stop each minute); a reset more than 6h away ends
+  the run as `usage-limit`.
+- `run.ts` takes `RunDeps` (backends, gate, preflight, sleep, collect);
+  `run.test.ts` drives the real loop against a temp git repo with fakes.
+
 ### The GitHub connection
 
 A project *is* a connected repository. `org` (Clerk, holds the plan) →

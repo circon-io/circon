@@ -16,6 +16,12 @@ export interface RunOptions {
   input?: string
   /** Called with each chunk as it arrives, e.g. to stream it to the dashboard. */
   onOutput?: (chunk: string) => void
+  /**
+   * Variables to remove from the child's environment. An empty string is not
+   * the same as unset to every tool, and Claude Code bills an API key in
+   * preference to a subscription whenever the key is merely present.
+   */
+  unsetEnv?: string[]
 }
 
 /**
@@ -24,9 +30,11 @@ export interface RunOptions {
  */
 export function run(cmd: string, args: string[], opts: RunOptions = {}): Promise<RunResult> {
   return new Promise((resolve) => {
+    const env = { ...process.env, ...opts.env }
+    for (const key of opts.unsetEnv ?? []) delete env[key]
     const child = spawn(cmd, args, {
       cwd: opts.cwd ?? process.cwd(),
-      env: { ...process.env, ...opts.env },
+      env,
       stdio: [opts.input ? 'pipe' : 'ignore', 'pipe', 'pipe'],
     })
 

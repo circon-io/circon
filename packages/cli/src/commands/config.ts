@@ -2,6 +2,7 @@ import { createInterface } from 'node:readline/promises'
 import { ui } from '../core/ui.ts'
 import { writeEnvFile, readEnvFile, writeConfig, readConfig } from '../core/config.ts'
 import { paths } from '../core/paths.ts'
+import { run, which } from '../core/exec.ts'
 
 /**
  * Every credential the machine needs, asked once. Existing values are shown as
@@ -23,9 +24,40 @@ export async function configCommand(): Promise<number> {
     const cfg = readConfig()
 
     ui.blank()
-    ui.info('Anthropic (architect model and the review pass)')
-    const key = await ask(rl, 'API key', anthropic['ANTHROPIC_API_KEY'])
-    if (key) writeEnvFile('anthropic', { ANTHROPIC_API_KEY: key }, 'Anthropic credentials')
+    ui.info('Anthropic — an API key (aider, and Claude Code without a subscription)')
+    const key = await ask(rl, 'API key, Enter to skip', anthropic['ANTHROPIC_API_KEY'])
+
+    ui.blank()
+    ui.info('Claude Code subscription — billed to your Pro/Max plan instead of per token')
+    ui.dim("  Run 'claude setup-token' in another terminal (it opens a browser once and")
+    ui.dim('  prints a token valid for a year), then paste it here. Enter to skip.')
+    ui.dim('  When both are set, circon keeps the API key away from Claude Code so the')
+    ui.dim('  subscription is what pays.')
+    const oauth = await ask(rl, 'Claude Code token', anthropic['CLAUDE_CODE_OAUTH_TOKEN'])
+
+    const anthropicEntries: Record<string, string> = {}
+    if (key) anthropicEntries['ANTHROPIC_API_KEY'] = key
+    if (oauth) anthropicEntries['CLAUDE_CODE_OAUTH_TOKEN'] = oauth
+    if (Object.keys(anthropicEntries).length) {
+      writeEnvFile('anthropic', anthropicEntries, 'Anthropic credentials')
+    }
+
+    ui.blank()
+    ui.info('OpenAI Codex — Enter to skip')
+    ui.dim("  For a ChatGPT plan, log in once with 'codex login --device-auth'; Codex keeps")
+    ui.dim('  that login itself. An API key here is only needed to bill the API instead.')
+    const openai = readEnvFile('openai')
+    const openaiKey = await ask(rl, 'OpenAI API key', openai['OPENAI_API_KEY'])
+    if (openaiKey && openaiKey !== openai['OPENAI_API_KEY']) {
+      writeEnvFile('openai', { OPENAI_API_KEY: openaiKey }, 'OpenAI credentials')
+      // Codex keeps its own credential store; hand it the key on stdin so it never
+      // appears in a process list.
+      if (await which('codex')) {
+        const login = await run('codex', ['login', '--with-api-key'], { input: openaiKey })
+        if (login.ok) ui.ok('Codex logged in with the API key.')
+        else ui.warn("Codex did not accept the key — run 'codex login' by hand.")
+      }
+    }
 
     ui.blank()
     ui.info('Project credentials — used by scaffolded projects, Enter to skip')

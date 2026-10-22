@@ -72,7 +72,7 @@ export const nodeComponent: Component = {
 
 export const jsGlobalsComponent: Component = {
   id: 'js-globals',
-  summary: 'Global npm tooling (pnpm, agent-device, claude-code, eas-cli)',
+  summary: 'Global npm tooling (pnpm, agent-device, claude-code, codex, eas-cli)',
   requires: ['node'],
   privileged: true,
 
@@ -82,6 +82,7 @@ export const jsGlobalsComponent: Component = {
       yarn: 'yarn',
       'agent-device': 'agent-device',
       '@anthropic-ai/claude-code': 'claude',
+      '@openai/codex': 'codex',
       'eas-cli': 'eas',
     }
 

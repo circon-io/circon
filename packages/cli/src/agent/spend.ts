@@ -20,6 +20,12 @@ export interface SpendEntry {
   /** 'aider' | 'verify' | other future sources. */
   source: string
   usd: number
+  /**
+   * Usage on a subscription (Claude Code, ChatGPT), priced at what the API
+   * would have cost. Recorded so the value is visible, never counted against a
+   * cap: the money was already spent on the subscription.
+   */
+  notional?: boolean
 }
 
 interface Ledger {
@@ -60,14 +66,14 @@ export function spentToday(now = new Date()): number {
   const start = new Date(now)
   start.setHours(0, 0, 0, 0)
   return readLedger()
-    .entries.filter((e) => new Date(e.at) >= start)
+    .entries.filter((e) => !e.notional && new Date(e.at) >= start)
     .reduce((sum, e) => sum + e.usd, 0)
 }
 
 export function spentSince(iso: string): number {
   const from = new Date(iso)
   return readLedger()
-    .entries.filter((e) => new Date(e.at) >= from)
+    .entries.filter((e) => !e.notional && new Date(e.at) >= from)
     .reduce((sum, e) => sum + e.usd, 0)
 }
 
@@ -81,6 +87,7 @@ export function usd(amount: number): string {
  */
 export class RunBudget {
   private spent = 0
+  private notionalSpent = 0
   private readonly project: string
   private perRun: number
   private perDay: number
@@ -108,14 +115,21 @@ export class RunBudget {
     this.perDay = perDay
   }
 
-  add(source: string, amount: number): void {
+  add(source: string, amount: number, opts: { notional?: boolean } = {}): void {
     if (!Number.isFinite(amount) || amount <= 0) return
-    this.spent += amount
-    record({ project: this.project, source, usd: amount })
+    if (opts.notional) this.notionalSpent += amount
+    else this.spent += amount
+    record({ project: this.project, source, usd: amount, ...(opts.notional ? { notional: true } : {}) })
   }
 
+  /** Real money: what counts against the caps. */
   get total(): number {
     return this.spent
+  }
+
+  /** What subscription usage would have cost on the API. */
+  get notional(): number {
+    return this.notionalSpent
   }
 
   /** Reason to stop now, or null. Checked at each iteration boundary. */
@@ -134,6 +148,7 @@ export class RunBudget {
 
   summary(): string {
     const parts = [`this run ${usd(this.spent)}`]
+    if (this.notionalSpent > 0) parts.push(`subscription ≈ ${usd(this.notionalSpent)}`)
     if (this.perRun > 0) parts.push(`cap ${usd(this.perRun)}`)
     if (this.perDay > 0) parts.push(`today ${usd(spentToday())} of ${usd(this.perDay)}`)
     return parts.join(' · ')
@@ -165,23 +180,6 @@ export function parseAiderCost(output: string): number | null {
   if (simple !== undefined) {
     const value = Number.parseFloat(simple)
     return Number.isFinite(value) ? value : null
-  }
-  return null
-}
-
-/**
- * Pull a cost out of `claude -p --output-format json`. The field has moved
- * between versions, so check the known spellings rather than assuming one.
- */
-export function parseClaudeCost(stdout: string): number | null {
-  try {
-    const parsed = JSON.parse(stdout) as Record<string, unknown>
-    for (const key of ['total_cost_usd', 'cost_usd', 'totalCostUsd']) {
-      const value = parsed[key]
-      if (typeof value === 'number' && Number.isFinite(value)) return value
-    }
-  } catch {
-    /* not JSON — caller falls back */
   }
   return null
 }

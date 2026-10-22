@@ -5,6 +5,9 @@ import { ui } from '../core/ui.ts'
 import { paths } from '../core/paths.ts'
 import { detectDrift } from '../core/conventions.ts'
 import { cliVersion } from './update.ts'
+import { effectiveConfig } from '../core/config.ts'
+import { realBackends, resolveRoles } from '../agent/backends/index.ts'
+import type { AgentBackendId } from '../core/config.ts'
 
 export interface Diagnosis {
   component: Component
@@ -95,6 +98,8 @@ export async function doctorCommand(): Promise<number> {
     ui.ok('Everything the machine needs is present.')
   }
 
+  await agentsReport()
+
   const drift = await detectDrift(cliVersion())
   if (drift.length) {
     ui.blank()
@@ -107,4 +112,35 @@ export async function doctorCommand(): Promise<number> {
   ui.dim(`state:  ${paths.state}`)
 
   return failed.length > 0 ? 1 : 0
+}
+
+/**
+ * Can each coding agent run here, and who pays for it? Separate from the
+ * component table because installed is not the same as usable: Claude Code can
+ * be present and logged out, and that only shows up as a failed run otherwise.
+ */
+async function agentsReport(): Promise<void> {
+  const cfg = effectiveConfig()
+  const roles = resolveRoles(cfg)
+  const backends = realBackends()
+  const used = new Map<AgentBackendId, string[]>()
+  for (const role of ['plan', 'build', 'review'] as const) {
+    const spec = roles[role]
+    if (spec) used.set(spec.backend, [...(used.get(spec.backend) ?? []), role])
+  }
+
+  ui.blank()
+  ui.info(ui.bold('Agents'))
+  const rows: string[][] = []
+  for (const id of Object.keys(backends) as AgentBackendId[]) {
+    const spec = (['plan', 'build', 'review'] as const).map((r) => roles[r]).find((s) => s?.backend === id) ?? { backend: id }
+    const availability = await backends[id].available(spec)
+    const roleNote = used.get(id)?.length ? `used for ${used.get(id)!.join(', ')}` : 'not used'
+    rows.push([
+      availability.ok ? ui.label.ok() : used.has(id) ? ui.label.missing() : ui.label.skipped(),
+      ui.bold(id),
+      availability.ok ? `${availability.billing} · ${roleNote}` : `${availability.reason ?? 'unavailable'} · ${roleNote}`,
+    ])
+  }
+  ui.table(rows)
 }

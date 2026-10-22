@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { parseAiderCost, parseClaudeCost, RunBudget, usd } from './spend.ts'
+import { parseAiderCost, RunBudget, usd } from './spend.ts'
 
 // RunBudget.add writes the spend ledger. Point it at a scratch home, or every
 // test run would charge the real machine's daily cap.
@@ -51,21 +51,6 @@ describe('parsing aider cost', () => {
   })
 })
 
-describe('parsing claude cost', () => {
-  test('reads total_cost_usd', () => {
-    assert.equal(parseClaudeCost(JSON.stringify({ total_cost_usd: 0.42, result: 'CLEAN' })), 0.42)
-  })
-
-  test('accepts the alternative field spellings', () => {
-    assert.equal(parseClaudeCost(JSON.stringify({ cost_usd: 0.1 })), 0.1)
-    assert.equal(parseClaudeCost(JSON.stringify({ totalCostUsd: 0.2 })), 0.2)
-  })
-
-  test('returns null for plain text', () => {
-    assert.equal(parseClaudeCost('CLEAN'), null)
-  })
-})
-
 describe('run budget', () => {
   const budget = (perRun: number, perDay = 0) => new RunBudget('t', perRun, perDay)
 
@@ -104,5 +89,16 @@ describe('formatting', () => {
     assert.equal(usd(0), '$0.00')
     assert.equal(usd(1.005), '$1.00')
     assert.equal(usd(12.3456), '$12.35')
+  })
+})
+
+describe('subscription usage', () => {
+  test('is recorded but never counts against a cap', () => {
+    const budget = new RunBudget('t', 1, 0)
+    budget.add('claude-code', 50, { notional: true })
+    assert.equal(budget.total, 0)
+    assert.equal(budget.notional, 50)
+    assert.equal(budget.exceeded(), null)
+    assert.match(budget.summary(), /subscription ≈ \$50\.00/)
   })
 })

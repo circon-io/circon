@@ -28,7 +28,7 @@ export const FLOATING = {
   /** Resolved from `sdkmanager --list`, newest stable, previews filtered out. */
   androidPlatform: 'latest-stable',
   androidBuildTools: 'latest-stable',
-  npmGlobals: ['pnpm', 'yarn', 'agent-device', '@anthropic-ai/claude-code', 'eas-cli'],
+  npmGlobals: ['pnpm', 'yarn', 'agent-device', '@anthropic-ai/claude-code', '@openai/codex', 'eas-cli'],
 } as const
 
 /** What actually got installed, so drift is visible between releases. */

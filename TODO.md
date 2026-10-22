@@ -67,18 +67,18 @@ between iterations, so a running edit is never pulled out from under the agent.
 
 ## 2. Agent backends and per-role models
 
-- [ ] `AgentBackend` interface, implemented by aider, Claude Code and Codex
-- [ ] Roles: `plan` (optional), `build` and `review`, each with its own backend
+- [x] `AgentBackend` interface, implemented by aider, Claude Code and Codex
+- [x] Roles: `plan` (optional), `build` and `review`, each with its own backend
       and model
-- [ ] Subscription vs API billing per backend. Subscription cost is recorded as
+- [x] Subscription vs API billing per backend. Subscription cost is recorded as
       notional and does not count against the cap
-- [ ] A usage-limit reply is classified as infrastructure: wait for the reset,
+- [x] A usage-limit reply is classified as infrastructure: wait for the reset,
       without counting a strike
-- [ ] `codex` component. `doctor` reports binary and auth status for each
+- [x] `codex` component. `doctor` reports binary and auth status for each
       backend
-- [ ] `circon config` walks through headless login (`claude setup-token`,
+- [x] `circon config` walks through headless login (`claude setup-token`,
       `codex login`)
-- [ ] `runCommand` takes injected deps, and the loop gets its own tests
+- [x] `runCommand` takes injected deps, and the loop gets its own tests
 - [ ] Check the terms of service. Can a subscription CLI be driven unattended,
       by the subscriber, on their own machine? The API-key path stays either way
 

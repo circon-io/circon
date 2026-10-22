@@ -10,6 +10,7 @@ export const OUTCOME_COLOR: Record<string, 'success' | 'danger' | 'warning' | 'a
   stuck: 'danger',
   aborted: 'danger',
   infrastructure: 'warning',
+  'usage-limit': 'warning',
   budget: 'warning',
   stopped: 'default',
   running: 'accent',
