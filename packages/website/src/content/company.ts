@@ -7,20 +7,20 @@
  * for a second fast channel besides email.
  */
 export const company = {
-  name: 'weblens GmbH',
+  name: 'solyd GmbH',
   legalForm: { en: 'limited liability company (GmbH)', de: 'Gesellschaft mit beschränkter Haftung' },
-  street: 'Birkenstr. 23',
+  street: 'Birkenstraße 23',
   postalCode: '40233',
   city: 'Düsseldorf',
   country: { en: 'Germany', de: 'Deutschland' },
   countryCode: 'DE',
-  email: 'info@weblens.io',
+  email: 'info@getsolyd.com',
   phone: undefined as string | undefined,
-  managingDirectors: ['Paul Tiedtke', 'Florian Piltz'],
-  register: { court: { en: 'Local Court (Amtsgericht) Düsseldorf', de: 'Amtsgericht Düsseldorf' }, number: 'HRB 104423' },
-  vatId: 'DE368449550',
+  managingDirectors: ['Paul Tiedtke'],
+  register: { court: { en: 'Local Court (Amtsgericht) Düsseldorf', de: 'Amtsgericht Düsseldorf' }, number: 'HRB 89127' },
+  vatId: 'DE333292358',
   /** § 18 (2) MStV: the person responsible for editorial content, with a summonable address. */
-  contentResponsible: { name: 'Paul Tiedtke', address: 'Birkenstr. 23, 40233 Düsseldorf' },
+  contentResponsible: { name: 'Paul Tiedtke', address: 'Birkenstraße 23, 40233 Düsseldorf' },
   /** The data protection authority for the company's seat (North Rhine-Westphalia). */
   supervisoryAuthority: {
     name: {

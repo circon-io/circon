@@ -107,7 +107,9 @@ export const imprint: LegalDocument = {
         <CompanyAddress locale="en" />
 
         <h2>Represented by</h2>
-        <p>Managing directors: {company.managingDirectors.join(', ')}</p>
+        <p>
+          Managing director{company.managingDirectors.length > 1 ? 's' : ''}: {company.managingDirectors.join(', ')}
+        </p>
 
         <h2>Contact</h2>
         <p>
