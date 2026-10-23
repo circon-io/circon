@@ -34,7 +34,7 @@ export function LanguageSwitcher({ current, label }: { current: Locale; label: s
   }
 
   return (
-    <nav aria-label={label} className="flex items-center rounded-lg border border-border bg-surface p-0.5 text-xs font-medium">
+    <nav aria-label={label} className="inline-flex items-center rounded-lg border border-border bg-surface p-0.5 text-xs font-medium">
       {locales.map((locale) => {
         const active = locale === current
         return (

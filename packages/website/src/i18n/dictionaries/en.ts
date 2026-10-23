@@ -48,7 +48,7 @@ export const en = {
     titleLead: 'From idea to production,',
     titleAccent: 'on a machine you own.',
     subtitle:
-      'Describe the app. An AI writes the plan, you approve it, and your own runner builds, tests and ships it: one gated commit at a time, one pull request per run.',
+      'Describe the app. An AI writes the plan, you approve it, and your own runner builds, tests and ships it. Every change has to pass the quality gate, and each run ends in one pull request.',
     primary: 'Get started',
     secondary: 'View on GitHub',
     installLabel: 'Install the runner',
@@ -65,10 +65,11 @@ export const en = {
     plan: 'Plan',
     build: 'Build',
     gate: 'Gate',
+    gateChecks: '5 checks',
     commit: 'Commit',
     pr: 'Pull request',
     running: 'running',
-    passed: 'passed',
+    passed: 'done',
     queued: 'queued',
     iteration: 'Iteration',
     cost: 'Cost',
@@ -77,24 +78,24 @@ export const en = {
   },
 
   stats: [
-    { value: '5', label: 'gate tiers, cheapest first' },
-    { value: '3', label: 'agent roles, any vendor' },
+    { value: '5', label: 'quality checks, cheapest first' },
+    { value: '3', label: 'agent roles, each with its own model' },
     { value: '1', label: 'pull request per run' },
-    { value: '0', label: 'lines of your code in our cloud' },
+    { value: '0', label: 'builds in our cloud' },
   ],
 
   flow: {
     eyebrow: 'How it works',
     title: 'You decide what. The runner does the rest.',
     subtitle:
-      'Two people approve, a machine does the work in between. The dashboard is where you plan and review; the runner is where code gets written and tested.',
+      'You approve twice, and a machine does the work in between. You plan and review in the dashboard; your runner writes and tests the code.',
     dashboardLane: 'Dashboard',
     runnerLane: 'Your runner',
     steps: [
       {
         lane: 'dashboard',
         title: 'Connect a repository',
-        body: 'Install the GitHub App on one repository. Access is granted per repository, tokens last an hour, and revoking it is uninstalling.',
+        body: 'Install the GitHub App on the repository you want to build. circon only sees the repositories you choose, and uninstalling the app revokes access at once.',
       },
       {
         lane: 'dashboard',
@@ -109,12 +110,12 @@ export const en = {
       {
         lane: 'runner',
         title: 'Enroll your machine',
-        body: 'One command, like a CI runner. It installs the whole toolchain, then waits for work.',
+        body: 'Install circon and enroll the machine with a token from the dashboard, like a self-hosted CI runner. It sets up the toolchain, then waits for work.',
       },
       {
         lane: 'runner',
         title: 'Build in a loop',
-        body: 'Plan, build, gate, commit: one task per iteration, on its own branch, never on main.',
+        body: 'Plan, build, test, commit: one task per iteration, on a branch of its own, never on main.',
       },
       {
         lane: 'dashboard',
@@ -128,21 +129,21 @@ export const en = {
     eyebrow: 'Quality gate',
     title: 'The gate decides, not the agent.',
     subtitle:
-      'Every iteration must pass a tiered gate before anything is committed. Cheapest first, stop at the first failure. The UI tiers drive the real app through its accessibility tree, not screenshots.',
+      'Every iteration must pass a series of checks before anything is committed: the cheapest run first, and the first failure stops the rest. The UI checks drive the real app and read its accessibility tree instead of comparing screenshots.',
     tiers: [
-      { title: 'Typecheck', body: 'tsc across the workspace. Catches most broken edits before anything runs.', cost: 'seconds' },
+      { title: 'Typecheck', body: 'Checks types across the whole project. Catches most broken edits in seconds, before anything runs.', cost: 'seconds' },
       { title: 'Unit tests', body: 'The project’s own suite: business rules, API routes, validation.', cost: 'seconds' },
-      { title: 'Web UI', body: 'Starts the API and the web app and fails on any missing accessibility label.', cost: 'a minute' },
-      { title: 'Android UI', body: 'The real app on an emulator the runner boots itself.', cost: 'minutes' },
+      { title: 'Web UI', body: 'Starts the API and the web app, then fails if an expected accessibility label is missing.', cost: 'a minute' },
+      { title: 'Android UI', body: 'The real app on an emulator that the runner starts itself.', cost: 'minutes' },
       { title: 'iOS UI', body: 'The simulator on a Mac runner, or a USB iPhone on Linux or macOS.', cost: 'minutes' },
     ],
-    scenarioPass: 'All tiers green: committed',
-    scenarioFail: 'Android failed: change reverted, the failure goes into the next prompt',
+    scenarioPass: 'All checks passed: committed',
+    scenarioFail: 'Android failed: the change is reverted, and the error goes into the next prompt',
     committed: 'committed',
     reverted: 'reverted',
     breakerTitle: 'A loop that is stuck stops itself',
     breakerBody:
-      'Three gate failures in a row trip a circuit breaker. Infrastructure trouble is retried with backoff, and spend caps stop a run before they are exceeded.',
+      'Three failed gates in a row stop the loop. Infrastructure problems are retried after a pause, and spend caps stop a run before it goes over budget.',
     reviewTitle: 'A second pair of eyes, every five iterations',
     reviewBody: 'A reviewer reads the accumulated diff for correctness and security. Its findings go into the next prompt.',
   },
@@ -154,18 +155,18 @@ export const en = {
       'Planning, building and reviewing are separate roles, and each can use a different agent and model. Let one vendor check another, and keep the cheap parts on a local model.',
     roles: [
       { title: 'Plan', body: 'A strong reasoning model breaks the next task down before any code is written.' },
-      { title: 'Build', body: 'Writes exactly one task from the plan. Never commits; only the gate does.' },
+      { title: 'Build', body: 'Implements exactly one task from the plan. It never commits; only changes that pass the gate are committed.' },
       { title: 'Review', body: 'A second model, ideally from another vendor, reviews the diff.' },
     ],
     hub: 'circon run',
     points: [
       {
         title: 'Your subscriptions, not just API keys',
-        body: 'Claude Code and Codex run on the plans you already pay for. That usage is recorded but never counts against your caps.',
+        body: 'Claude Code and Codex can run on the plans you already pay for. That usage is tracked, but it never counts toward your spend caps.',
       },
       {
         title: 'A usage limit is a pause, not a failure',
-        body: 'When a subscription window runs out, the loop discards the partial edit and waits for the reset.',
+        body: 'When a subscription limit is reached, the loop discards the unfinished change and waits until the limit resets.',
       },
       {
         title: 'Local models on your GPU',
@@ -176,17 +177,17 @@ export const en = {
 
   runner: {
     eyebrow: 'Your machine, your models',
-    title: 'One command turns a box into a runner.',
+    title: 'Turn a machine you own into a runner.',
     subtitle:
       'The runner is hardware you control, like a self-hosted CI runner. We never run your code in our cloud; the hosted part only coordinates projects, jobs and live logs.',
     points: [
       {
         title: 'Safe to re-run',
-        body: 'Setup probes the real system and installs only what is missing. It never downloads a model twice or duplicates a config line.',
+        body: 'Setup checks what is actually installed and adds only what is missing. It never downloads a model twice or duplicates a config line.',
       },
       {
-        title: 'Adopts, never clobbers',
-        body: 'Node from nvm or Docker from your distro is left alone. Upgrades happen only when you ask for them.',
+        title: 'Leaves your setup alone',
+        body: 'Node from nvm or Docker from your distribution stays untouched. Upgrades happen only when you ask for them.',
       },
       {
         title: 'Linux or Mac',
@@ -204,7 +205,7 @@ export const en = {
     eyebrow: 'Conventions are the product',
     title: 'Every project is built the same way.',
     subtitle:
-      'Stack, monorepo layout, accessibility contract and CI/CD are written down once in a conventions repository, and every agent reads it. That sameness makes agent output quick to review and every project easy to host.',
+      'The stack, the monorepo layout, accessibility rules and CI/CD are written down once in a conventions repository that every agent reads. Because every project looks the same, agent output is quick to review and every project is easy to host.',
     tree: [
       { path: 'apps/mobile', note: 'Expo: iOS, Android and web, admin included' },
       { path: 'apps/web', note: 'Next.js, only when SEO needs it' },
@@ -215,7 +216,7 @@ export const en = {
       { path: 'PRD.md', note: 'What to build. Only humans edit it.' },
     ],
     points: [
-      { title: 'Portable by construction', body: 'Cloudflare by default, but only an adapter file may depend on it.' },
+      { title: 'Portable by construction', body: 'Cloudflare by default, but only one adapter file may depend on it, so switching hosts stays a small change.' },
       { title: 'Pinned per run', body: 'Conventions never change mid-run. They are the contract.' },
       { title: 'Versioned in git', body: 'Editing a convention is a commit. Every runner picks it up on the next update.' },
     ],
@@ -228,12 +229,12 @@ export const en = {
       {
         label: 'Gate 1',
         title: 'Merge the pull request',
-        body: 'This code is correct. Each run is one PR on its own branch, with screenshots, gate results and cost attached.',
+        body: 'Merging means “this code is correct”. Each run arrives as one pull request on its own branch, with screenshots, check results and cost attached.',
       },
       {
         label: 'Gate 2',
         title: 'Approve the release',
-        body: 'This should reach users now. Web goes to hosting, mobile through Codemagic to TestFlight and Google Play. Nobody has to read a diff.',
+        body: 'Approving means “this should reach users now”. The web app goes to hosting, the mobile apps go through Codemagic to TestFlight and Google Play. Nobody has to read a diff.',
       },
     ],
   },
@@ -253,7 +254,7 @@ export const en = {
       },
       {
         name: 'Pro',
-        price: 'Subscription',
+        price: 'Paid',
         description: 'For teams running several projects in parallel.',
         cta: 'Upgrade in the dashboard',
         features: ['10 runners', '10 projects', '100 plan generations', 'iOS runners', '90 days of run history', 'Priority support'],
@@ -299,9 +300,9 @@ export const en = {
 
   cta: {
     title: 'Your next app, built while you sleep.',
-    subtitle: 'Install the runner in one command, connect a repository and describe what you want.',
+    subtitle: 'Install the runner, connect a repository and describe what you want.',
     primary: 'Open the dashboard',
-    secondary: 'Read the docs',
+    secondary: 'Read the quick start',
   },
 
   footer: {
@@ -312,7 +313,7 @@ export const en = {
     imprint: 'Imprint',
     privacy: 'Privacy policy',
     source: 'Source code',
-    docs: 'Setup guide',
+    docs: 'Quick start',
     license: 'CLI under MIT. Control plane and dashboard under FSL-1.1-ALv2.',
     rights: 'All rights reserved.',
   },

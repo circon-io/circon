@@ -19,7 +19,8 @@ export function CopyCommand({ command, copy, copied, className }: { command: str
   return (
     <div className={cx('group flex items-center gap-3 rounded-xl border border-border bg-terminal py-2 pl-4 pr-2 font-mono text-[13px] text-terminal-foreground shadow-sm', className)}>
       <span className="select-none text-accent" aria-hidden>$</span>
-      <code className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap [scrollbar-width:none]">{command}</code>
+      {/* Faded at the edge: a long command scrolls, it is not cut off. */}
+      <code className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap [mask-image:linear-gradient(to_right,black_88%,transparent)] [scrollbar-width:none]">{command}</code>
       <button
         type="button"
         onClick={onCopy}

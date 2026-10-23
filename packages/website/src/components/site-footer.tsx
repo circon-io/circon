@@ -24,7 +24,7 @@ export function SiteFooter({ locale, dict }: { locale: Locale; dict: Dictionary 
       title: t.resources,
       links: [
         { href: site.githubUrl, label: t.source },
-        { href: `${site.githubUrl}/blob/main/SETUP.md`, label: t.docs },
+        { href: site.docsUrl, label: t.docs },
         { href: site.dashboardUrl, label: dict.nav.dashboard },
         { href: `${home}#faq`, label: dict.nav.faq },
       ],

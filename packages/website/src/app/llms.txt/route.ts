@@ -64,7 +64,7 @@ export function GET() {
     '## Links',
     '',
     `- [Source code](${site.githubUrl})`,
-    `- [Setup guide](${site.githubUrl}/blob/main/SETUP.md)`,
+    `- [Quick start](${site.docsUrl})`,
     `- [Dashboard](${site.dashboardUrl})`,
     ...locales.flatMap((locale) =>
       (Object.keys(pages) as PageId[]).map((id) => `- [${legalDocuments[id].title[locale]}](${absolute(pathFor(locale, id))})`),

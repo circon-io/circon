@@ -39,7 +39,7 @@ export function Flow({ dict }: { dict: Dictionary }) {
               <li key={step.title} className="grid grid-cols-[2rem_1fr] gap-4 md:grid-cols-[1fr_3rem_1fr] md:gap-0">
                 <div className={cx('hidden md:block', runner && 'md:order-3')}>
                   <Reveal className={cx(runner ? 'md:pl-2' : 'md:pr-2')}>
-                    <StepCard index={i} title={step.title} body={step.body} align={runner ? 'left' : 'right'} />
+                    <StepCard title={step.title} body={step.body} />
                   </Reveal>
                 </div>
                 <div className="relative flex justify-center pt-5 md:order-2">
@@ -56,7 +56,7 @@ export function Flow({ dict }: { dict: Dictionary }) {
                   {/* Mobile: every card on the right, with its lane named. */}
                   <Reveal className="md:hidden">
                     <p className="mb-1.5 text-xs font-medium text-muted">{runner ? t.runnerLane : t.dashboardLane}</p>
-                    <StepCard index={i} title={step.title} body={step.body} align="left" />
+                    <StepCard title={step.title} body={step.body} />
                   </Reveal>
                 </div>
               </li>
@@ -68,14 +68,11 @@ export function Flow({ dict }: { dict: Dictionary }) {
   )
 }
 
-function StepCard({ title, body, align }: { index: number; title: string; body: string; align: 'left' | 'right' }) {
+// Text is left-aligned in both lanes: right-aligned paragraphs read badly, and
+// the card's side of the rail already says which lane it is in.
+function StepCard({ title, body }: { title: string; body: string }) {
   return (
-    <article
-      className={cx(
-        'group rounded-xl border border-border bg-surface p-5 shadow-[0_1px_2px_rgb(0_0_0/0.03)] transition-colors hover:border-accent/40',
-        align === 'right' && 'md:text-right',
-      )}
-    >
+    <article className="group rounded-xl border border-border bg-surface p-5 shadow-[0_1px_2px_rgb(0_0_0/0.03)] transition-colors hover:border-accent/40">
       <h3 className="text-[15px] font-semibold">{title}</h3>
       <p className="mt-1.5 text-sm leading-relaxed text-muted">{body}</p>
     </article>

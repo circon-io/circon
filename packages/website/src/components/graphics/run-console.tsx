@@ -83,7 +83,7 @@ export function RunConsole({ t }: { t: Dictionary['console'] }) {
           </div>
         </div>
 
-        <div className="grid sm:grid-cols-[11.5rem_minmax(0,1fr)]">
+        <div className="grid sm:grid-cols-[10rem_minmax(0,1fr)]">
           {/* The plan */}
           <div className="hidden border-r border-border p-4 sm:block">
             <div className="mb-3 font-mono text-[11px] text-muted">{t.tasksTitle}</div>
@@ -113,15 +113,8 @@ export function RunConsole({ t }: { t: Dictionary['console'] }) {
           {/* The iteration */}
           <ol className="space-y-1 p-4 text-[13px]">
             <Row state={stateOf(b, 0)} label={t.plan} meta="claude-code · fable" icon={<SparklesIcon className="size-3.5" />} t={t} />
-            <Row
-              state={stateOf(b, 1)}
-              label={t.build}
-              meta="claude-code · opus"
-              icon={<CodeIcon className="size-3.5" />}
-              t={t}
-              trailing={b > 1 ? <span className="font-mono text-[11px] text-success">{DIFFS[task]}</span> : null}
-            />
-            <Row state={gateState} label={t.gate} meta="5 tiers" icon={<FlaskIcon className="size-3.5" />} t={t}>
+            <Row state={stateOf(b, 1)} label={t.build} meta="claude-code · opus" icon={<CodeIcon className="size-3.5" />} t={t} />
+            <Row state={gateState} label={t.gate} meta={t.gateChecks} icon={<FlaskIcon className="size-3.5" />} t={t}>
               <div className="mt-2 flex flex-wrap gap-1.5 pl-8">
                 {TIER_SHORT.map((name, i) => {
                   const s = stateOf(b, tierBeat(i))
@@ -149,6 +142,7 @@ export function RunConsole({ t }: { t: Dictionary['console'] }) {
               icon={<BranchIcon className="size-3.5" />}
               t={t}
               meta={b >= 7 ? COMMITS[task] : '—'}
+              trailing={b > 7 ? <span className="font-mono text-[11px] text-success">{DIFFS[task]}</span> : null}
             />
             <Row state={b === LAST ? 'passed' : 'queued'} label={t.pr} icon={<PullRequestIcon className="size-3.5" />} t={t} meta={`#${42 + task}`}>
               <AnimatePresence>

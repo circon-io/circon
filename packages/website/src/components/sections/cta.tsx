@@ -18,13 +18,13 @@ export function Cta({ dict }: { dict: Dictionary }) {
             <div className="orb -bottom-24 -right-16 size-80 bg-glow [animation-delay:-9s]" />
           </div>
           <h2 className="mx-auto max-w-2xl text-balance text-3xl font-semibold tracking-tight sm:text-5xl">{t.title}</h2>
-          <p className="mx-auto mt-4 max-w-xl text-pretty text-lg text-muted">{t.subtitle}</p>
+          <p className="mx-auto mt-4 max-w-xl text-balance text-lg text-muted">{t.subtitle}</p>
           <div className="mt-8 flex flex-wrap justify-center gap-3">
             <a href={site.dashboardUrl} className={cx(buttonVariants({ size: 'lg', variant: 'primary' }), 'gap-2')}>
               {t.primary}
               <ArrowRightIcon />
             </a>
-            <a href={`${site.githubUrl}/blob/main/SETUP.md`} className={buttonVariants({ size: 'lg', variant: 'outline' })}>
+            <a href={site.docsUrl} className={buttonVariants({ size: 'lg', variant: 'outline' })}>
               {t.secondary}
             </a>
           </div>

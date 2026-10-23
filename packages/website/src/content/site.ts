@@ -9,6 +9,8 @@ export const site = {
   url: (process.env.NEXT_PUBLIC_SITE_URL || 'https://circon.io').replace(/\/$/, ''),
   dashboardUrl: (process.env.NEXT_PUBLIC_DASHBOARD_URL || 'https://platform.circon.io').replace(/\/$/, ''),
   githubUrl: 'https://github.com/circon-io/circon',
+  /** The README's quick start. Not SETUP.md, which is about deploying circon's own servers. */
+  docsUrl: 'https://github.com/circon-io/circon#quick-start',
   installCommand: 'curl -fsSL https://raw.githubusercontent.com/circon-io/circon/main/init.sh | bash',
 } as const
 
