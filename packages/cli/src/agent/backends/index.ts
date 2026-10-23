@@ -20,6 +20,8 @@ export interface Roles {
   plan: RoleSpec | null
   build: RoleSpec
   review: RoleSpec
+  /** The once-per-run security audit; the reviewer's seat unless set or turned off. */
+  audit: RoleSpec | null
 }
 
 /**
@@ -31,17 +33,19 @@ export interface Roles {
  */
 export function resolveRoles(cfg: ResolvedConfig): Roles {
   const agents = cfg.agents ?? {}
+  const review = agents.review ?? { backend: 'claude-code' as const, model: cfg.verifyModel }
   return {
     plan: agents.plan ?? null,
     build: agents.build ?? { backend: 'aider', model: AIDER_DEFAULT_MODEL, editorModel: AIDER_DEFAULT_EDITOR },
-    review: agents.review ?? { backend: 'claude-code', model: cfg.verifyModel },
+    review,
+    audit: agents.audit === null ? null : (agents.audit ?? review),
   }
 }
 
 /** For the run record and the dashboard: which backend and model filled each role. */
 export function describeRoles(roles: Roles): Partial<Record<AgentRole, { backend: string; model?: string }>> {
   const out: Partial<Record<AgentRole, { backend: string; model?: string }>> = {}
-  for (const role of ['plan', 'build', 'review'] as const) {
+  for (const role of ['plan', 'build', 'review', 'audit'] as const) {
     const spec = roles[role]
     if (spec) out[role] = { backend: spec.backend, ...(spec.model ? { model: spec.model } : {}) }
   }

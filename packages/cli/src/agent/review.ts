@@ -1,7 +1,7 @@
-import { existsSync, mkdirSync, readdirSync } from 'node:fs'
+import { existsSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { run, which } from '../core/exec.ts'
-import { projectPaths } from '../core/paths.ts'
+import { SHOT_DIR } from './screens.ts'
 import type { Repo } from './git.ts'
 import type { Task } from './progress.ts'
 import { usd } from './spend.ts'
@@ -11,8 +11,7 @@ import { usd } from './spend.ts'
  *
  * The gate asserts on the accessibility tree because pixels are the wrong thing
  * to fail a build on. A reviewer deciding whether to ship wants to *see* it, so
- * screenshots are captured once, after the gate is green, purely as a review
- * artifact — never as an assertion.
+ * the PR carries screenshots (see screens.ts), purely as a review artifact.
  */
 
 export interface RunSummary {
@@ -24,31 +23,13 @@ export interface RunSummary {
   tasksOpen: Task[]
   notes: string
   gateTiers: string[]
+  /** null when the pass did not run; [] when it ran and found nothing. */
+  designFindings?: string[] | null
+  auditFindings?: string[] | null
   costUsd: number
   logPath: string
   /** The run's page in the dashboard, when this runner is enrolled. */
   runUrl?: string
-}
-
-const SHOT_DIR = join(projectPaths.dir, 'screenshots')
-
-/**
- * Capture one screenshot per configured surface. Best effort: a failure here
- * must never affect the run's outcome, because the work is already committed.
- */
-export async function captureScreenshots(cwd: string): Promise<string[]> {
-  if (!(await which('agent-device'))) return []
-
-  const dir = join(cwd, SHOT_DIR)
-  mkdirSync(dir, { recursive: true })
-
-  const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
-  const file = join(SHOT_DIR, `web-${stamp}.png`)
-
-  const shot = await run('agent-device', ['screenshot', file], { cwd, timeoutMs: 60_000 })
-  if (!shot.ok) return []
-
-  return existsSync(join(cwd, file)) ? [file] : []
 }
 
 export function existingScreenshots(cwd: string): string[] {
@@ -109,6 +90,24 @@ export function prBody(summary: RunSummary, screenshots: string[]): string {
     lines.push('_Captured after the gate passed, for review only — the gate')
     lines.push('asserts on the accessibility tree, never on pixels._', '')
     for (const s of screenshots) lines.push(`![${s.split('/').pop()?.split('?')[0] ?? 'screenshot'}](${s})`)
+    lines.push('')
+  }
+
+  if (summary.auditFindings) {
+    lines.push('## Security audit', '')
+    if (summary.auditFindings.length) {
+      lines.push('_A whole-repository read once the plan was done. Advisory: decide before merging._', '')
+      for (const f of summary.auditFindings) lines.push(`- ${f}`)
+    } else {
+      lines.push('Nothing found.')
+    }
+    lines.push('')
+  }
+
+  if (summary.designFindings?.length) {
+    lines.push('## Design review', '')
+    lines.push('_From the screenshots above. Advisory — the gate never fails on pixels._', '')
+    for (const f of summary.designFindings) lines.push(`- ${f}`)
     lines.push('')
   }
 

@@ -77,9 +77,11 @@ const db = {
   integrations: [{ id: 'itg_1', provider: 'github', account_login: 'acme', account_type: 'Organization', created_at: ago(60 * 24 * 30), revoked_at: null }],
   runs: [
     { id: 'run_live01', runner_id: 'run_studio', job_id: 'job_1', project_slug: 'acme__shop', branch: 'circon/run-2026-10-22-a1b2c3', started_at: ago(48), finished_at: null, outcome: 'running', iterations: 6, commits: 5, cost_usd: 1.84, pr_url: null, pr_state: null, failed_tier: null, gate_tiers: ['typecheck', 'unit tests', 'web UI', 'android UI'], commit_subjects: ['chore: record Undo a check-off for five seconds', 'feat: Undo a check-off for five seconds', 'feat: Empty state for a new list', 'chore: sync prd', 'feat: Check off an item, synced to every phone'] },
-    { id: 'run_02', runner_id: 'run_mini', job_id: 'job_2', project_slug: 'acme__shop', branch: 'circon/run-2026-10-21-d4e5f6', started_at: ago(60 * 20), finished_at: ago(60 * 18), outcome: 'complete', iterations: 9, commits: 9, cost_usd: 2.31, pr_url: 'https://github.com/acme/shop/pull/42', pr_state: 'merged', failed_tier: null, gate_tiers: ['typecheck', 'unit tests', 'web UI', 'android UI', 'ios UI'], commit_subjects: ['chore: screenshots for review', 'feat: Share the list with a household member by invite link', 'feat: Sign in with email', 'feat: Create a list and add items'] },
+    { id: 'run_02', runner_id: 'run_mini', job_id: 'job_2', project_slug: 'acme__shop', branch: 'circon/run-2026-10-21-d4e5f6', started_at: ago(60 * 20), finished_at: ago(60 * 18), outcome: 'complete', iterations: 9, commits: 9, cost_usd: 2.31, pr_url: 'https://github.com/acme/shop/pull/42', pr_state: 'merged', failed_tier: null, gate_tiers: ['typecheck', 'unit tests', 'web UI', 'android UI', 'ios UI'], commit_subjects: ['chore: screenshots for review', 'feat: Share the list with a household member by invite link', 'feat: Sign in with email', 'feat: Create a list and add items'],
+      audit_findings: ['[medium] services/api/src/routes/invites.ts: an invite token never expires, so a leaked link works forever -> store an expiry and refuse tokens older than 7 days', '[low] apps/mobile/app/sign-in.tsx: the error shows the raw API message -> map it to a translated message'],
+      design_findings: ['home: the empty list says "No data" -> say what a list is for and offer "Create your first list"', 'sign-in: the primary button is 36pt tall -> make it 44pt'] },
     { id: 'run_03', runner_id: 'run_studio', job_id: 'job_3', project_slug: 'acme__bookings', branch: 'circon/run-2026-10-21-0a9b8c', started_at: ago(60 * 26), finished_at: ago(60 * 25), outcome: 'stuck', iterations: 4, commits: 1, cost_usd: 0.92, pr_url: 'https://github.com/acme/bookings/pull/7', pr_state: 'open', failed_tier: 'web UI', gate_tiers: ['typecheck', 'unit tests', 'web UI'] },
-    { id: 'run_04', runner_id: 'run_studio', job_id: 'job_4', project_slug: 'acme__shop', branch: 'circon/run-2026-10-20-77aa11', started_at: ago(60 * 46), finished_at: ago(60 * 44), outcome: 'complete', iterations: 12, commits: 11, cost_usd: 3.05, pr_url: 'https://github.com/acme/shop/pull/39', pr_state: 'merged', failed_tier: null, gate_tiers: ['typecheck', 'unit tests', 'web UI', 'android UI'] },
+    { id: 'run_04', runner_id: 'run_studio', job_id: 'job_4', project_slug: 'acme__shop', branch: 'circon/run-2026-10-20-77aa11', started_at: ago(60 * 46), finished_at: ago(60 * 44), outcome: 'complete', iterations: 12, commits: 11, cost_usd: 3.05, pr_url: 'https://github.com/acme/shop/pull/39', pr_state: 'merged', failed_tier: null, gate_tiers: ['typecheck', 'unit tests', 'web UI', 'android UI'], audit_findings: [] },
     { id: 'run_05', runner_id: 'run_mini', job_id: 'job_5', project_slug: 'acme__shop', branch: 'circon/run-2026-10-19-5e5e5e', started_at: ago(60 * 70), finished_at: ago(60 * 69), outcome: 'usage-limit', iterations: 3, commits: 2, cost_usd: 0, pr_url: 'https://github.com/acme/shop/pull/37', pr_state: 'closed', failed_tier: null, gate_tiers: ['typecheck', 'unit tests'] },
     { id: 'run_06', runner_id: 'run_old', job_id: 'job_6', project_slug: 'acme__bookings', branch: 'circon/run-2026-10-18-c0ffee', started_at: ago(60 * 94), finished_at: ago(60 * 93), outcome: 'infrastructure', iterations: 0, commits: 0, cost_usd: 0.04, pr_url: null, pr_state: null, failed_tier: null, gate_tiers: [] },
   ] as Array<Record<string, unknown>>,
@@ -180,7 +182,7 @@ export async function previewFetch(path: string, init: RequestInit = {}): Promis
     if (!run) return { status: 404, body: { ok: false, error: { code: 'not_found', message: 'No such run.' } } }
     const runner = db.runners.find((r) => r.id === run['runner_id'])
     return okBody({
-      run: { ...run, runner_name: runner?.name ?? null, agents: { plan: { backend: 'claude-code', model: 'fable' }, build: { backend: 'claude-code', model: 'opus' }, review: { backend: 'codex' } } },
+      run: { ...run, runner_name: runner?.name ?? null, agents: { plan: { backend: 'claude-code', model: 'fable' }, build: { backend: 'claude-code', model: 'opus' }, review: { backend: 'codex' }, ...(run['audit_findings'] ? { audit: { backend: 'codex' } } : {}) } },
       live: run['outcome'] === 'running' ? runner?.state : null,
     })
   }
@@ -273,7 +275,7 @@ export async function previewFetch(path: string, init: RequestInit = {}): Promis
     return okBody({
       pending: { number: 44, url: 'https://github.com/acme/shop/pull/44', title: 'chore: version packages', body: '## @app/mobile 1.4.0\n\n### Minor changes\n\n- Share a list with your household by invite link\n- Check items off with an undo\n\n### Patch changes\n\n- The list no longer flickers while syncing' },
       lastRelease: { approved_at: ago(60 * 24 * 6), pr_url: 'https://github.com/acme/shop/pull/31', title: 'chore: version packages' },
-      runs: db.runs.filter((r) => r['pr_state'] === 'merged').map((r) => ({ ...r, screenshots: [] })),
+      runs: db.runs.filter((r) => r['pr_state'] === 'merged').map((r) => ({ ...r, screenshots: [], audit_findings: r['audit_findings'] ?? null })),
       costUsd: 5.36,
       devBuild: { status: 'finished', startedAt: ago(60 * 5), artifacts: [{ name: 'shop-dev-client.ipa', url: 'https://example.com/shop.ipa' }] },
     })

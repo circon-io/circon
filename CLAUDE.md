@@ -119,8 +119,8 @@ if a `requires` names something unknown or declared later.
 
 ### Agent backends and roles
 
-`src/agent/backends/`. A run has three roles — `plan` (optional), `build`,
-`review` — and each is filled by a backend (`aider`, `claude-code`, `codex`) and
+`src/agent/backends/`. A run has four roles — `plan` (optional), `build`,
+`review`, `audit` (once, at the end) — and each is filled by a backend (`aider`, `claude-code`, `codex`) and
 a model, from `agents` in the layered config. With nothing configured the loop
 is what it always was: aider builds (Sonnet architect, local Qwen editor),
 Claude Code reviews.
@@ -138,8 +138,16 @@ Claude Code reviews.
   limiter is not mistaken for one. The loop discards the partial edit and waits
   for the reset (checking for stop each minute); a reset more than 6h away ends
   the run as `usage-limit`.
-- `run.ts` takes `RunDeps` (backends, gate, preflight, sleep, collect);
-  `run.test.ts` drives the real loop against a temp git repo with fakes.
+- **Once the plan is done**, two advisory passes run, each in the code
+  review's finding format: a design review of every public screen's screenshot
+  (`screens.ts`, `design.ts`; only a backend with `vision`), and a whole-repo
+  security audit (`audit.ts`, the `audit` role). With `polishIterations` set,
+  design findings become generated tasks in `progress.json` — never `PRD.md` —
+  and are dropped at the end of the run if unfinished, so no later run inherits
+  work nobody approved.
+- `run.ts` takes `RunDeps` (backends, gate, preflight, sleep, collect, screens,
+  and the secret calls); `run.test.ts` drives the real loop against a temp git
+  repo with fakes.
 
 ### The dashboard
 

@@ -174,6 +174,17 @@ describe('runs', () => {
     const { run } = await data<{ run: { agents: unknown } }>(await getRun(env, ORG, 'r1'))
     assert.deepEqual(run.agents, agents)
   })
+
+  test('findings: a pass that found nothing is not a pass that did not run', async () => {
+    const { env } = setup()
+    await data(await recordRun(post({ runId: 'r1', projectSlug: 'acme__shop', outcome: 'complete', auditFindings: [], designFindings: ['home: tiny button -> 44pt', 7] }), env, 'run_a', ORG))
+    await data(await recordRun(post({ runId: 'r2', projectSlug: 'acme__shop', outcome: 'complete' }), env, 'run_a', ORG))
+    const one = await data<{ run: { audit_findings: unknown; design_findings: unknown } }>(await getRun(env, ORG, 'r1'))
+    assert.deepEqual(one.run.audit_findings, [])
+    assert.deepEqual(one.run.design_findings, ['home: tiny button -> 44pt'])
+    const two = await data<{ run: { audit_findings: unknown } }>(await getRun(env, ORG, 'r2'))
+    assert.equal(two.run.audit_findings, null)
+  })
 })
 
 describe('configuration', () => {

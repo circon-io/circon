@@ -61,11 +61,12 @@ const doesTheTask: Step = (req) => {
   return { costUsd: 0.5 }
 }
 
-function backend(id: AgentBackendId, build: Step, opts: { billing?: 'api' | 'subscription'; plan?: Step } = {}) {
+function backend(id: AgentBackendId, build: Step, opts: { billing?: 'api' | 'subscription'; plan?: Step; review?: (prompt: string) => string } = {}) {
   const calls: Array<{ role: string; prompt: string }> = []
   const result = (r: Partial<AgentResult>): AgentResult => ({ ok: true, output: '', text: '', costUsd: null, ...r })
   const b: AgentBackend = {
     id,
+    vision: true,
     needsLocalModel: () => false,
     available: async () => ({ ok: true, billing: opts.billing ?? 'api' }),
     build: async (req) => {
@@ -78,7 +79,7 @@ function backend(id: AgentBackendId, build: Step, opts: { billing?: 'api' | 'sub
     },
     review: async (req) => {
       calls.push({ role: 'review', prompt: req.prompt })
-      return result({ text: 'CLEAN' })
+      return result({ text: opts.review ? opts.review(req.prompt) : 'CLEAN' })
     },
   }
   return { backend: b, calls }
@@ -93,6 +94,7 @@ function deps(build: AgentBackend, gate: (n: number) => Partial<GateResult> = ()
     preflight: async () => null,
     sleep: async (ms) => { sleeps.push(ms) },
     collect: async () => [],
+    screens: async () => [],
     requestSecret: async () => null,
     jobSecrets: async () => null,
   }
@@ -305,6 +307,35 @@ describe('the loop', () => {
     assert.deepEqual(seen, [undefined, 'sk_test_1'])
     assert.doesNotMatch(prompts[1] ?? '', /Still waiting/)
     delete process.env['STRIPE_SECRET_KEY']
+  })
+
+  test('with polish on, the design review findings are built as fixes once the plan is done', async () => {
+    prd(['add a cart'])
+    const { backend: b, calls } = backend('claude-code', doesTheTask, {
+      review: (prompt) => (prompt.includes('You are a product designer') ? '- home: the checkout button is 32pt tall -> make it 44pt' : 'CLEAN'),
+    })
+    const { d } = deps(b)
+    d.screens = async () => ['.circon/screenshots/home.png']
+    const code = await runCommand(5, {
+      config: { agents: { build: { backend: 'claude-code' }, review: { backend: 'claude-code' } }, polishIterations: 2 },
+    }, d)
+    assert.equal(code, 0)
+    const log = subjects()
+    assert.ok(log.includes('feat: add a cart'))
+    assert.ok(log.includes('fix: home: the checkout button is 32pt tall -> make it 44pt'))
+    assert.ok(log.includes('chore: polish tasks from the design review'))
+    assert.match(readFileSync(join(project, 'PRD.md'), 'utf8'), /^# PRD\n\n## Task Backlog\n- \[ \] add a cart\n$/)
+    // The audit runs once the plan is done, over the whole repository.
+    assert.equal(calls.filter((c) => c.prompt.includes('auditing this whole repository')).length, 1)
+  })
+
+  test('polish is off by default, and an audit can be turned off', async () => {
+    prd(['add a cart'])
+    const { backend: b, calls } = backend('claude-code', doesTheTask)
+    const { d } = deps(b)
+    await runCommand(3, { config: { agents: { build: { backend: 'claude-code' }, audit: null } } }, d)
+    assert.equal(calls.filter((c) => c.role === 'review' && (c.prompt.includes('product designer') || c.prompt.includes('auditing'))).length, 0)
+    assert.ok(!subjects().some((s) => s.startsWith('fix:')))
   })
 
   test('refuses to start when the build backend cannot run', async () => {

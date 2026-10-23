@@ -24,6 +24,9 @@ export function codexArgs(req: AgentRequest, mode: 'build' | 'read', lastMessage
     // Never pause for approval: nobody is there to give it.
     '--ask-for-approval', 'never',
     'exec',
+    // Takes several values, so it goes before the next flag, never last where
+    // it would swallow the prompt.
+    ...(req.images?.length ? ['--image', req.images.join(',')] : []),
     '--json',
     '--output-last-message', lastMessageFile,
     ...(req.spec.model ? ['--model', req.spec.model] : []),
@@ -101,6 +104,7 @@ export function codexBackend(exec: Exec = run): AgentBackend {
 
   return {
     id: 'codex',
+    vision: true,
     needsLocalModel: () => false,
     async available(): Promise<Availability> {
       if (!(await which('codex'))) {

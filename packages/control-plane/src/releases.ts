@@ -1,4 +1,5 @@
 import { type Env, fail, ok, id, nowIso } from './env.ts'
+import { jsonList } from './fleet.ts'
 import { findOpenPull, mergePull } from './integrations/github.ts'
 import { open } from './secrets.ts'
 
@@ -95,7 +96,7 @@ export async function releaseReport(env: Env, org: string, projectId: string): P
 
   // What went in since the last release: runs whose PR was merged.
   const runs = await env.DB.prepare(
-    `SELECT id, branch, pr_url, finished_at, cost_usd, commits, screenshots FROM runs
+    `SELECT id, branch, pr_url, finished_at, cost_usd, commits, screenshots, audit_findings FROM runs
      WHERE org = ?1 AND project_slug = ?2 AND pr_state = 'merged' AND finished_at >= ?3
      ORDER BY finished_at DESC LIMIT 50`,
   )
@@ -108,7 +109,7 @@ export async function releaseReport(env: Env, org: string, projectId: string): P
     } catch {
       screenshots = []
     }
-    return { ...r, screenshots }
+    return { ...r, screenshots, audit_findings: r['audit_findings'] === null ? null : jsonList(r['audit_findings']) }
   })
 
   const pr = await findOpenPull(env, row.installation_id, fullName, versionBranch(row.default_branch), row.default_branch)

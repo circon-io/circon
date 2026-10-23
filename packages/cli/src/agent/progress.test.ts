@@ -3,7 +3,9 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync, readFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { readTasks, openTasks, markComplete, inferCompletedTask, allComplete, taskId } from './progress.ts'
+import {
+  readTasks, openTasks, markComplete, inferCompletedTask, allComplete, taskId, addGeneratedTasks, pruneGeneratedTasks, prdComplete,
+} from './progress.ts'
 
 let dir = ''
 
@@ -137,5 +139,28 @@ describe('inferring what the agent finished', () => {
 
   test('returns null when nothing is open', () => {
     assert.equal(inferCompletedTask(dir, 'COMPLETED: anything', []), null)
+  })
+})
+
+describe('polish tasks', () => {
+  test('come after the plan, never land in PRD.md, and are added once', () => {
+    writePrd('## Task Backlog\n- [x] Build the login screen\n')
+    assert.equal(addGeneratedTasks(dir, ['home: button too small -> 44pt', 'home: button too small -> 44pt', '']), 1)
+    assert.equal(addGeneratedTasks(dir, ['home: button too small -> 44pt']), 0)
+    const tasks = readTasks(dir)
+    assert.deepEqual(tasks.map((t) => [t.text, t.generated ?? false]), [['Build the login screen', false], ['home: button too small -> 44pt', true]])
+    assert.doesNotMatch(readFileSync(join(dir, 'PRD.md'), 'utf8'), /44pt/)
+    assert.equal(prdComplete(dir), true)
+    assert.equal(allComplete(dir), false)
+  })
+
+  test('unfinished ones are dropped at the end of a run; finished ones stay recorded', () => {
+    writePrd('## Task Backlog\n- [x] Build the login screen\n')
+    addGeneratedTasks(dir, ['fix the contrast', 'fix the spacing'])
+    markComplete(dir, 'fix the contrast', 'abc123')
+    assert.equal(pruneGeneratedTasks(dir), true)
+    assert.deepEqual(openTasks(dir), [])
+    assert.equal(readTasks(dir).find((t) => t.generated)?.text, 'fix the contrast')
+    assert.equal(pruneGeneratedTasks(dir), false)
   })
 })

@@ -10,10 +10,15 @@ import { Repo } from '../agent/git.ts'
 import { acquireLock, releaseLock, stopRequested, clearStop } from '../agent/lock.ts'
 import { conventionsContext, runVerification, type Reviewer } from '../agent/verify.ts'
 import { RunBudget } from '../agent/spend.ts'
-import { readTasks, openTasks, markComplete, inferCompletedTask, allComplete } from '../agent/progress.ts'
+import {
+  readTasks, openTasks, markComplete, inferCompletedTask, allComplete, prdComplete, addGeneratedTasks, pruneGeneratedTasks,
+} from '../agent/progress.ts'
+import { captureScreens } from '../agent/screens.ts'
+import { designReview } from '../agent/design.ts'
+import { securityAudit } from '../agent/audit.ts'
 import { preflight, classifyFailure, backoffMs } from '../agent/health.ts'
 import {
-  captureScreenshots, existingScreenshots, openPullRequest, prBody, prTitle, screenshotUrl, type RunSummary,
+  existingScreenshots, openPullRequest, prBody, prTitle, screenshotUrl, type RunSummary,
 } from '../agent/review.ts'
 import { collect } from './gc.ts'
 import {
@@ -85,6 +90,8 @@ export interface RunDeps {
   sleep: (ms: number) => Promise<void>
   /** Post-run housekeeping; it can prune the machine's pnpm store, so tests replace it. */
   collect: typeof collect
+  /** Screenshots of the public screens; it boots the app, so tests replace it. */
+  screens: typeof captureScreens
   /** The control plane's side of a credential request. */
   requestSecret: typeof requestSecret
   jobSecrets: typeof jobSecrets
@@ -123,6 +130,7 @@ const realDeps = (): RunDeps => ({
   preflight,
   sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   collect,
+  screens: captureScreens,
   requestSecret,
   jobSecrets,
 })
@@ -222,6 +230,14 @@ export async function runCommand(
     }
     const reviewSeat = await seat(roles.review)
     if (typeof reviewSeat === 'string') ui.warn(`Review pass skipped: ${reviewSeat}.`)
+    // The audit is the reviewer's seat unless configured apart, so no second probe then.
+    let auditSeat: Seat | null = null
+    if (roles.audit) {
+      const same = JSON.stringify(roles.audit) === JSON.stringify(roles.review)
+      const seated = same ? reviewSeat : await seat(roles.audit)
+      if (typeof seated === 'string') ui.warn(`Security audit skipped: ${seated}.`)
+      else auditSeat = seated
+    }
     const needsLocalModel = [planner, builder, typeof reviewSeat === 'string' ? null : reviewSeat]
       .some((s) => s?.backend.needsLocalModel(s.spec))
 
@@ -302,7 +318,7 @@ export async function runCommand(
       runId: `run_${randomBytes(9).toString('hex')}`,
       projectSlug: project,
       branch,
-      agents: describeRoles({ plan: planner?.spec ?? null, build: builder.spec, review: roles.review }),
+      agents: describeRoles({ plan: planner?.spec ?? null, build: builder.spec, review: roles.review, audit: auditSeat?.spec ?? null }),
       ...(opts.jobId ? { jobId: opts.jobId } : {}),
     }
     await reportRun(report)
@@ -343,7 +359,29 @@ export async function runCommand(
       return 'resume'
     }
 
-    for (let i = 1; i <= maxLoops; i++) {
+    // The plan is done: look at it as a designer would, and spend up to
+    // `polishIterations` on what the review found. Once per run.
+    let limit = maxLoops
+    let polished = false
+    const startPolish = async (): Promise<boolean> => {
+      if (polished || cfg.polishIterations <= 0) return false
+      polished = true
+      const r = reviewer()
+      if (!r) return false
+      ui.step('Plan complete — capturing the screens for a design review…')
+      const shots = await deps.screens(cwd)
+      const outcome = await designReview(cwd, shots, r)
+      if (outcome.skipped) ui.dim(`Design review skipped: ${outcome.skipped}.`)
+      // One finding per iteration is the most the budget can fix.
+      const added = addGeneratedTasks(cwd, (outcome.findings ?? []).slice(0, cfg.polishIterations))
+      if (!added) return false
+      await repo.stageAll()
+      if (await repo.hasStagedChanges()) await repo.commit('chore: polish tasks from the design review')
+      ui.info(`Polishing: ${added} finding${added === 1 ? '' : 's'} from the design review, up to ${cfg.polishIterations} iterations.`)
+      return true
+    }
+
+    for (let i = 1; i <= limit; i++) {
       // Dashboard edits land here, between iterations, never inside one.
       const changed = opts.refresh?.take() ?? { config: false, prd: false, secrets: false }
       if ((changed.secrets || refetchSecrets) && opts.jobId) {
@@ -398,12 +436,16 @@ export async function runCommand(
         continue
       }
 
-      ui.heading(`Iteration ${i}/${maxLoops}`)
+      ui.heading(`Iteration ${i}/${limit}`)
       channel.progress({ runId: report.runId, project, branch, iteration: i, costUsd: budget.total })
-      const openBefore = openTasks(cwd)
+      let openBefore = openTasks(cwd)
       if (openBefore.length === 0) {
-        ended = 'complete'
-        break
+        if (!(await startPolish())) {
+          ended = 'complete'
+          break
+        }
+        limit = i - 1 + cfg.polishIterations
+        openBefore = openTasks(cwd)
       }
       const task = openBefore[0]?.text ?? 'the highest-priority open task'
 
@@ -449,6 +491,9 @@ export async function runCommand(
       // ---- build ----------------------------------------------------------------
       const prompt = [
         `Implement ONLY this task: ${task}`,
+        openBefore[0]?.generated
+          ? 'It comes from a design review of the finished app, not from PRD.md: fix exactly what it names, nothing else.'
+          : '',
         '',
         'Do NOT edit PRD.md — it is the human-owned specification and circon tracks',
         'completion separately. Do not commit; circon commits what passes its gate.',
@@ -561,7 +606,8 @@ export async function runCommand(
         if (await repo.hasStagedChanges()) {
           const notes = notesSince(cwd, notesStart)
           const done = inferCompletedTask(cwd, notes, openBefore)
-          await repo.commit(done ? `feat: ${done.text}` : `chore: iteration ${i}`)
+          // Polish is a fix to what the plan already built, not a new feature.
+          await repo.commit(done ? `${done.generated ? 'fix' : 'feat'}: ${done.text}` : `chore: iteration ${i}`)
           const sha = await repo.head()
           if (done) {
             markComplete(cwd, done.text, sha ?? undefined)
@@ -595,6 +641,10 @@ export async function runCommand(
       }
 
       if (allComplete(cwd)) {
+        if (await startPolish()) {
+          limit = i + cfg.polishIterations
+          continue
+        }
         ended = 'complete'
         break
       }
@@ -605,6 +655,14 @@ export async function runCommand(
     }
 
     // ---- wrap up -------------------------------------------------------------
+    // Polish that ran out of iterations still leaves the plan done.
+    if (ended === 'limit' && polished && prdComplete(cwd)) ended = 'complete'
+    // Unfinished polish is dropped, not inherited: a later run must not build
+    // findings nobody asked for outside a polish budget.
+    if (pruneGeneratedTasks(cwd)) {
+      await repo.stageAll()
+      if (await repo.hasStagedChanges()) await repo.commit('chore: drop unfinished polish tasks')
+    }
     const commitSubjects = await repo.commitsSince(startCommit)
     if (commitSubjects.length === 0) {
       ui.warn('No commits produced — nothing to review.')
@@ -616,11 +674,39 @@ export async function runCommand(
 
     // Screenshots are committed to the run branch, so the PR and the release
     // report can show them; a path that exists only on the runner shows nothing.
-    const shots = [...new Set([...(await captureScreenshots(cwd)), ...existingScreenshots(cwd)])]
+    const captured = await deps.screens(cwd)
+    const shots = captured.length ? captured : existingScreenshots(cwd)
     if (shots.length) {
       await repo.stageAll()
       if (await repo.hasStagedChanges()) await repo.commit('chore: screenshots for review')
     }
+
+    // Advisory passes for the human deciding on the PR. Neither changes a file,
+    // and a limit or a failure here only means the PR goes out without them.
+    let designFindings: string[] | null = null
+    const designer = reviewer()
+    if (designer && captured.length) {
+      ui.step('Design review of the screens…')
+      const outcome = await designReview(cwd, captured, designer)
+      designFindings = outcome.findings
+      if (outcome.skipped) ui.dim(`Design review skipped: ${outcome.skipped}.`)
+    }
+    let auditFindings: string[] | null = null
+    if (auditSeat && ended === 'complete') {
+      ui.step(`Security audit with ${auditSeat.backend.id}…`)
+      const outcome = await securityAudit(cwd, startCommit ?? 'HEAD', {
+        ...auditSeat,
+        budget,
+        // A whole repository is more to read than one diff.
+        budgetUsd: cfg.verifyBudgetUsd * 4,
+        onOutput: (chunk) => channel.log(chunk),
+      })
+      auditFindings = outcome.findings
+      if (outcome.skipped) ui.dim(`Security audit skipped: ${outcome.skipped}.`)
+      else if (auditFindings?.length) ui.warn(`Security audit: ${auditFindings.length} finding${auditFindings.length === 1 ? '' : 's'} — see the PR.`)
+    }
+    if (designFindings) report.designFindings = designFindings
+    if (auditFindings) report.auditFindings = auditFindings
     const pushed = await repo.push(branch)
     const slug = /^[A-Za-z0-9][\w.-]*__[A-Za-z0-9][\w.-]*$/.test(project) ? project : await repo.originSlug()
     const screenshots = slug && pushed ? shots.map((path) => screenshotUrl(slug, branch, path)) : shots
@@ -635,6 +721,8 @@ export async function runCommand(
       tasksOpen: openTasks(cwd),
       notes: notesSince(cwd, notesStart),
       gateTiers: loops.passed,
+      designFindings,
+      auditFindings,
       costUsd: budget.total,
       logPath: runLog,
       ...(settings?.dashboardUrl ? { runUrl: `${settings.dashboardUrl}/runs/${report.runId}` } : {}),

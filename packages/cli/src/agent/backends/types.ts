@@ -31,6 +31,8 @@ export interface AgentRequest {
   onOutput?: (chunk: string) => void
   /** A hard cap on this one call, where the CLI supports one. */
   budgetUsd?: number
+  /** Screenshots to look at, relative to cwd. Only sent to a backend with `vision`. */
+  images?: string[]
 }
 
 export interface UsageLimit {
@@ -53,6 +55,8 @@ export interface AgentResult {
 
 export interface AgentBackend {
   readonly id: AgentBackendId
+  /** Whether it can look at images: what the design review needs. */
+  readonly vision: boolean
   /** Whether this role spec needs Ollama on this machine. */
   needsLocalModel(spec: RoleSpec): boolean
   available(spec: RoleSpec): Promise<Availability>

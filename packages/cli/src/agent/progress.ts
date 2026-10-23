@@ -22,10 +22,17 @@ export interface Task {
   done: boolean
   commit?: string
   completedAt?: string
+  /** Not from PRD.md: added by the loop from the design review's findings. */
+  generated?: boolean
 }
 
 interface ProgressFile {
   completed: Record<string, { text: string; commit?: string; at: string }>
+  /**
+   * Polish tasks from the design review. Kept here, never in PRD.md: the PRD is
+   * what the owner approved, and these are the loop's own follow-ups.
+   */
+  generated?: Array<{ text: string; source: 'design-review'; at: string }>
 }
 
 /** Only `- [ ]` / `- [x]` bullets count, so prose in the PRD is never a task. */
@@ -87,7 +94,54 @@ export function readTasks(cwd: string, prdFile = 'PRD.md'): Task[] {
     if (recorded?.at) task.completedAt = recorded.at
     tasks.push(task)
   }
+
+  // After the PRD's own tasks, so the approved plan always comes first.
+  for (const g of progress.generated ?? []) {
+    const id = taskId(g.text)
+    if (tasks.some((t) => t.id === id)) continue
+    const recorded = progress.completed[id]
+    const task: Task = { id, text: g.text, done: Boolean(recorded), generated: true }
+    if (recorded?.commit) task.commit = recorded.commit
+    if (recorded?.at) task.completedAt = recorded.at
+    tasks.push(task)
+  }
   return tasks
+}
+
+/** Record polish tasks; returns how many were new. */
+export function addGeneratedTasks(cwd: string, texts: string[]): number {
+  const progress = readProgress(cwd)
+  const generated = progress.generated ?? []
+  const known = new Set(generated.map((g) => taskId(g.text)))
+  let added = 0
+  for (const raw of texts) {
+    const text = raw.trim()
+    if (!text || known.has(taskId(text))) continue
+    known.add(taskId(text))
+    generated.push({ text, source: 'design-review', at: new Date().toISOString() })
+    added++
+  }
+  if (!added) return 0
+  progress.generated = generated
+  writeProgress(cwd, progress)
+  return added
+}
+
+/** Drop polish tasks that were never finished; returns whether any were. */
+export function pruneGeneratedTasks(cwd: string): boolean {
+  const progress = readProgress(cwd)
+  const before = progress.generated?.length ?? 0
+  if (!before) return false
+  progress.generated = (progress.generated ?? []).filter((g) => progress.completed[taskId(g.text)])
+  if (progress.generated.length === before) return false
+  writeProgress(cwd, progress)
+  return true
+}
+
+function writeProgress(cwd: string, progress: ProgressFile): void {
+  const file = progressPath(cwd)
+  mkdirSync(dirname(file), { recursive: true })
+  writeFileSync(file, `${JSON.stringify(progress, null, 2)}\n`)
 }
 
 export function openTasks(cwd: string, prdFile = 'PRD.md'): Task[] {
@@ -95,15 +149,13 @@ export function openTasks(cwd: string, prdFile = 'PRD.md'): Task[] {
 }
 
 export function markComplete(cwd: string, text: string, commit?: string): void {
-  const file = progressPath(cwd)
   const progress = readProgress(cwd)
   progress.completed[taskId(text)] = {
     text: text.trim(),
     at: new Date().toISOString(),
     ...(commit ? { commit } : {}),
   }
-  mkdirSync(dirname(file), { recursive: true })
-  writeFileSync(file, `${JSON.stringify(progress, null, 2)}\n`)
+  writeProgress(cwd, progress)
 }
 
 /**
@@ -134,5 +186,11 @@ export function inferCompletedTask(
 
 export function allComplete(cwd: string, prdFile = 'PRD.md'): boolean {
   const tasks = readTasks(cwd, prdFile)
+  return tasks.length > 0 && tasks.every((t) => t.done)
+}
+
+/** The approved plan is done, whatever polish is still open. */
+export function prdComplete(cwd: string, prdFile = 'PRD.md'): boolean {
+  const tasks = readTasks(cwd, prdFile).filter((t) => !t.generated)
   return tasks.length > 0 && tasks.every((t) => t.done)
 }

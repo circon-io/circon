@@ -4,14 +4,15 @@ import { useCallback, useState } from 'react'
 import { Button } from '@heroui/react'
 import { ago, money, useApi } from '@/lib/api'
 import { useData } from '@/lib/use-data'
-import { Card, CardHeader, EmptyState, Notice, Skeleton } from '../ui/primitives'
+import { Badge, Card, CardHeader, EmptyState, Notice, Skeleton } from '../ui/primitives'
+import { FindingsList } from '../runs/findings'
 import { PrdView } from '../plan/prd-view'
-import { ExternalIcon, PhoneIcon, RocketIcon } from '../ui/icons'
+import { ExternalIcon, PhoneIcon, RocketIcon, ShieldIcon } from '../ui/icons'
 
 interface Report {
   pending: { number: number; url: string; title: string; body: string } | null
   lastRelease: { approved_at: string; pr_url: string; title: string | null } | null
-  runs: Array<{ id: string; branch: string | null; screenshots: string[]; cost_usd: number }>
+  runs: Array<{ id: string; branch: string | null; screenshots: string[]; cost_usd: number; audit_findings: string[] | null }>
   costUsd: number
   devBuild: { status: string; startedAt: string | null; artifacts: Array<{ name: string; url: string }> } | null
 }
@@ -56,6 +57,8 @@ export function ReleasePanel({ projectId }: { projectId: string }) {
   }
 
   const shots = data.runs.flatMap((r) => r.screenshots)
+  const audited = data.runs.filter((r) => r.audit_findings !== null)
+  const auditFindings = [...new Set(audited.flatMap((r) => r.audit_findings ?? []))]
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
       <div className="flex flex-col gap-6">
@@ -91,6 +94,19 @@ export function ReleasePanel({ projectId }: { projectId: string }) {
           <a href={data.pending.url} target="_blank" rel="noreferrer" className="mt-3 flex items-center justify-center gap-1.5 text-xs text-muted hover:text-foreground">
             Version PR #{data.pending.number} <ExternalIcon className="size-3" />
           </a>
+        </Card>
+        <Card>
+          <div className="flex items-center gap-2 text-sm font-semibold"><ShieldIcon className="size-4 text-muted" /> Security audit</div>
+          {audited.length === 0 ? (
+            <p className="mt-2 text-sm text-muted">No run in this release finished its plan, so none was audited.</p>
+          ) : auditFindings.length === 0 ? (
+            <p className="mt-2 text-sm text-muted">
+              <Badge tone="success">Nothing found</Badge>
+              <span className="ml-2">in {audited.length} of {data.runs.length} run{data.runs.length === 1 ? '' : 's'}</span>
+            </p>
+          ) : (
+            <div className="mt-3" data-testid="release-audit"><FindingsList findings={auditFindings} /></div>
+          )}
         </Card>
         <Card>
           <div className="flex items-center gap-2 text-sm font-semibold"><PhoneIcon className="size-4 text-muted" /> Try it on a phone</div>

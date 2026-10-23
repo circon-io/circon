@@ -218,6 +218,9 @@ export interface RunRecord {
   gateTiers?: string[]
   /** Subjects of the run's commits — the PRD task names — for the digest. */
   commitSubjects?: string[]
+  /** Advisory findings from the design review and the security audit. */
+  designFindings?: string[]
+  auditFindings?: string[]
 }
 
 export async function reportRun(record: RunRecord): Promise<boolean> {

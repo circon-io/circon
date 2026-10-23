@@ -68,6 +68,9 @@ export function aiderBackend(exec: Exec = run): AgentBackend {
 
   return {
     id: 'aider',
+    // The loop drives aider one-shot over code files, never images, so it sits
+    // out the design review.
+    vision: false,
     needsLocalModel: (spec: RoleSpec) =>
       isLocal(spec.model) || isLocal(spec.editorModel ?? AIDER_DEFAULT_EDITOR),
     async available(spec) {

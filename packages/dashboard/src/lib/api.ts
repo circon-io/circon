@@ -35,7 +35,7 @@ export interface MachineHealth {
 }
 
 export type AgentBackend = 'aider' | 'claude-code' | 'codex'
-export type AgentRole = 'plan' | 'build' | 'review'
+export type AgentRole = 'plan' | 'build' | 'review' | 'audit'
 
 export interface RoleSpec {
   backend: AgentBackend
@@ -52,6 +52,8 @@ export interface RunConfig {
   iosRunnerMode?: 'none' | 'simulator' | 'device'
   skipTiers?: string[]
   agents?: Partial<Record<AgentRole, RoleSpec | null>>
+  /** Iterations spent on the design review's findings once the plan is done. */
+  polishIterations?: number
 }
 
 export interface Runner {
@@ -112,6 +114,9 @@ export interface RunDetail extends Run {
   runner_name: string | null
   agents: Partial<Record<AgentRole, RoleSpec>> | null
   commit_subjects?: string[]
+  /** null: the pass did not run. []: it ran and found nothing. */
+  design_findings?: string[] | null
+  audit_findings?: string[] | null
 }
 
 /** What got built across the fleet in a window: the daily report. */

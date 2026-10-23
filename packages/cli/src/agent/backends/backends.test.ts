@@ -145,6 +145,11 @@ describe('codex', () => {
     assert.match(args.at(-1) ?? '', /^Engineering conventions[\s\S]*Implement ONLY this task/)
   })
 
+  test('images go before the next flag, so the variadic option cannot swallow the prompt', () => {
+    const args = codexArgs(req({ spec: { backend: 'codex' }, images: ['.circon/screenshots/home.png', '.circon/screenshots/sign-in.png'] }), 'read', '/tmp/x')
+    assert.deepEqual(args.slice(2, 6), ['exec', '--image', '.circon/screenshots/home.png,.circon/screenshots/sign-in.png', '--json'])
+  })
+
   test('review is read-only', () => {
     const args = codexArgs(req({ spec: { backend: 'codex' } }), 'read', '/tmp/x')
     assert.equal(args[args.indexOf('--sandbox') + 1], 'read-only')

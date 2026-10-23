@@ -122,6 +122,8 @@ export function claudeCodeBackend(exec: Exec = run): AgentBackend {
 
   return {
     id: 'claude-code',
+    // Its Read tool opens images, so a read-only call can look at screenshots by path.
+    vision: true,
     needsLocalModel: () => false,
     async available(): Promise<Availability> {
       if (!(await which('claude'))) {

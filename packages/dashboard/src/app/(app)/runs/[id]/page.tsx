@@ -11,7 +11,8 @@ import { OutcomeBadge, PrBadge } from '@/components/ui/status'
 import { LogView } from '@/components/runs/log-view'
 import { useLiveLogs } from '@/components/live-logs'
 import { TIERS } from '@/components/loops/tiers'
-import { BranchIcon, CheckIcon, ExternalIcon, LoopIcon, SparklesIcon, StopIcon, TerminalIcon, XIcon } from '@/components/ui/icons'
+import { BranchIcon, CheckIcon, ExternalIcon, LoopIcon, ShieldIcon, SparklesIcon, StopIcon, TerminalIcon, XIcon } from '@/components/ui/icons'
+import { FindingsList } from '@/components/runs/findings'
 
 /**
  * One run. The PR body links here, so this is the page a reviewer lands on
@@ -119,7 +120,7 @@ export default function RunPage() {
             <CardHeader icon={<SparklesIcon />} title="Agents" description="Who did what in this run." />
             {run.agents && Object.keys(run.agents).length > 0 ? (
               <ul className="flex flex-col gap-3">
-                {(['plan', 'build', 'review'] as const).map((role) => {
+                {(['plan', 'build', 'review', 'audit'] as const).map((role) => {
                   const spec = run.agents?.[role]
                   return (
                     <li key={role} className="flex items-center justify-between gap-3 text-sm">
@@ -146,6 +147,28 @@ export default function RunPage() {
           <Notice tone="warning">
             This run stopped reporting before it finished. Its runner went offline or moved on to other work, so its outcome was never recorded.
           </Notice>
+        )}
+
+        {Boolean(run.audit_findings || run.design_findings?.length) && (
+          <div className="grid gap-6 lg:grid-cols-2">
+            {run.audit_findings && (
+              <Card>
+                <CardHeader
+                  icon={<ShieldIcon />}
+                  title="Security audit"
+                  description="The whole repository, read once the plan was done. Advisory: decide before merging."
+                  actions={run.audit_findings.length === 0 ? <Badge tone="success">Nothing found</Badge> : <Badge tone="warning">{run.audit_findings.length}</Badge>}
+                />
+                {run.audit_findings.length > 0 && <FindingsList findings={run.audit_findings} />}
+              </Card>
+            )}
+            {run.design_findings && run.design_findings.length > 0 && (
+              <Card>
+                <CardHeader icon={<SparklesIcon />} title="Design review" description="From the screenshots of every public screen. Advisory — the gate never fails on pixels." />
+                <FindingsList findings={run.design_findings} />
+              </Card>
+            )}
+          </div>
         )}
 
         {(run.commit_subjects?.length ?? 0) > 0 && (

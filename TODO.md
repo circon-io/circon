@@ -236,8 +236,8 @@ locally, without any SSH orchestration.
 
 ## 7. From working to good
 
-The gate proves the app works. Nothing yet asks whether it is good to use, or
-whether its security holds up across the whole codebase rather than a diff.
+The gate proves the app works. This section asks whether it is good to use,
+and whether its security holds up across the whole codebase rather than a diff.
 These items come after §0. They add mechanism on top of a loop no one has seen
 finish a task.
 
@@ -248,23 +248,28 @@ finish a task.
 - [x] The build prompt has a UX self-check for UI tasks, and the reviewer
       flags user-facing gaps (unhandled states, text outside i18n, missing
       labels)
-- [ ] Conventions repo: add `## Proposed additions` to `templates/PRD.md`
-- [ ] **Missing-keys checklist before the run.** The control plane compares
-      `.env.example` on the default branch with the project's secrets. The
-      dashboard lists what is missing, with each comment as the instructions
-      for getting it. The planner can name the external services up front
-- [ ] **Design review, then polish.** Capture a screenshot of every route
-      (Expo Router web export, `agent-device`). A multimodal reviewer looks at
-      them, advisory only, in the same finding format as code review. When the
-      PRD is complete, run up to `polishIterations` (default 0) on the findings,
-      kept as generated tasks in `progress.json` and never in `PRD.md`, through
-      the same gate. Screens behind auth need a Clerk testing token, so start
-      with public routes
-- [ ] **Whole-repo security audit**, a new `audit` role so it can be the
-      strongest model or a second vendor. Run it once when all tasks are done:
-      `requireRole` on every route, webhook signatures, secrets in the client
-      bundle, validation at the `packages/shared` contract. Findings go in the
-      PR and the release report
+- [x] Conventions v2.1.0: `templates/PRD.md` has `## External services` and
+      `## Proposed additions`; the UI rules name touch targets, copy and
+      `packages/ui`, so the prompts no longer hardcode the stack
+- [x] **Missing-keys checklist.** The control plane reads `.env.example` on the
+      default branch (comments become the instructions, `# --- X ---` the
+      groups) and the plan's External services, and checks each name against
+      the stored secrets. The project's Secrets tab lists what is missing, with
+      an inline Add; the overview shows the count. Advice, never a gate
+- [x] **Design review, then polish.** `.circon/flows/screens.sh` captures every
+      public route (`.circon/screens.txt`, or Expo Router's file routes minus
+      groups and dynamic segments). The reviewer looks at them when it can see
+      images (Claude Code, Codex; not aider), in the code review's finding
+      format, and the findings go in the PR and the run view. With
+      `polishIterations` > 0 they become generated tasks in `progress.json`,
+      built through the same gate as `fix:` commits; unfinished ones are
+      dropped at the end of the run
+- [ ] Design review of screens behind sign-in, with a Clerk testing token
+- [x] **Whole-repo security audit**, the `audit` role (the reviewer's seat
+      unless set; `null` turns it off). Once per completed run, with a
+      checklist: role checks on every route, webhook signatures, secrets in the
+      client bundle, validation at the API boundary. Findings go in the PR, the
+      run view and the release report
 
 **Why the polish stays advisory:** screenshots are pixels, and the gate never
 fails on pixels. A model's taste is input for the next iteration, just like the

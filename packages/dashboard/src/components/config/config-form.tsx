@@ -33,6 +33,7 @@ const ROLES: Array<{ role: AgentRole; title: string; description: string }> = [
   { role: 'plan', title: 'Plan', description: 'Reads the task and decides the approach before any code is written. Optional.' },
   { role: 'build', title: 'Build', description: 'Writes the code. Nothing it does is committed until the feedback loops pass.' },
   { role: 'review', title: 'Review', description: 'Reviews the diff every few iterations and after failures. A second vendor catches different mistakes.' },
+  { role: 'audit', title: 'Security audit', description: 'Reads the whole repository once the plan is done. Inherits the reviewer unless set.' },
 ]
 
 /**
@@ -186,7 +187,7 @@ function AgentsSection({ config, set, inheritsFrom, inherited }: SectionProps) {
         title="Agents"
         description="Who plans, builds and reviews, and with which model. Claude Code and Codex run on your subscriptions when the runner is logged in."
       />
-      <div className="grid gap-3 @2xl:grid-cols-3">
+      <div className="grid gap-3 @2xl:grid-cols-2 @5xl:grid-cols-4">
         {ROLES.map(({ role, title, description }) => {
           const spec = config.agents?.[role]
           const below = inherited.agents?.[role]
@@ -194,7 +195,7 @@ function AgentsSection({ config, set, inheritsFrom, inherited }: SectionProps) {
           const choice = spec === null ? 'off' : (spec?.backend ?? 'inherit')
           const options = [
             { value: 'inherit', label: 'Inherit' },
-            ...(role === 'plan' ? [{ value: 'off', label: 'Off' }] : []),
+            ...(role === 'plan' || role === 'audit' ? [{ value: 'off', label: 'Off' }] : []),
             ...BACKENDS,
           ]
           return (
@@ -289,6 +290,21 @@ function BudgetsSection({ config, set, inheritsFrom, inherited }: SectionProps) 
             </div>
           </SettingRow>
         ))}
+        <SettingRow
+          title="Polish iterations"
+          description="Once the plan is done, a design review looks at every public screen and its findings are fixed through the same loops, for up to this many iterations. 0 turns it off."
+        >
+          <input
+            type="number"
+            min={0}
+            max={20}
+            className={cx(inputClass, 'tabular-nums')}
+            placeholder={inherited.polishIterations !== undefined ? `Inherit: ${inherited.polishIterations}` : `Inherit (${inheritsFrom}: 0)`}
+            value={config.polishIterations ?? ''}
+            onChange={(e) => set('polishIterations', e.target.value === '' ? undefined : Number(e.target.value))}
+            aria-label="Polish iterations"
+          />
+        </SettingRow>
         <SettingRow title="Review cadence" description="Run the review pass every N iterations, as well as after every failure.">
           <input
             type="number"

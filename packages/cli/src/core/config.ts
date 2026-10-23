@@ -11,7 +11,7 @@ import { paths } from './paths.ts'
 
 export type IosRunnerMode = 'none' | 'simulator' | 'device'
 export type AgentBackendId = 'aider' | 'claude-code' | 'codex'
-export type AgentRole = 'plan' | 'build' | 'review'
+export type AgentRole = 'plan' | 'build' | 'review' | 'audit'
 
 export interface RoleSpec {
   backend: AgentBackendId
@@ -33,8 +33,10 @@ export interface RunConfig {
   iosRunnerMode?: IosRunnerMode
   /** Gate tiers not to run here, e.g. on a runner without KVM. */
   skipTiers?: string[]
-  /** `plan: null` turns a planning step inherited from a lower layer off. */
+  /** `plan: null` or `audit: null` turns that step, inherited from a lower layer, off. */
   agents?: Partial<Record<AgentRole, RoleSpec | null>>
+  /** Iterations spent on the design review's findings once the PRD is done. 0 is off. */
+  polishIterations?: number
 }
 
 /** Machine-local settings: everything a run uses, plus what only this machine needs. */
@@ -53,6 +55,8 @@ const DEFAULTS = {
   budgetPerDayUsd: 40,
   iosRunnerMode: 'none' as IosRunnerMode,
   skipTiers: [] as string[],
+  // Polish costs money nobody approved in the plan, so it is opt-in.
+  polishIterations: 0,
 }
 
 export type ResolvedConfig = Config & typeof DEFAULTS

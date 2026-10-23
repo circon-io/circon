@@ -491,6 +491,8 @@ export async function recordRun(
     screenshots?: unknown
     gateTiers?: unknown
     commitSubjects?: unknown
+    designFindings?: unknown
+    auditFindings?: unknown
   } | null
 
   if (!body?.runId || !body.projectSlug) {
@@ -517,6 +519,12 @@ export async function recordRun(
     ? body.gateTiers.filter((t): t is string => typeof t === 'string' && GATE_TIERS.includes(t))
     : []
 
+  // Null when the pass did not run, so "found nothing" stays distinguishable.
+  const findings = (value: unknown): string | null =>
+    Array.isArray(value)
+      ? JSON.stringify(value.filter((f): f is string => typeof f === 'string').slice(0, 30).map((f) => f.slice(0, 400)))
+      : null
+
   // For the digest, not an archive: enough subjects to say what was built.
   const subjects = Array.isArray(body.commitSubjects)
     ? body.commitSubjects.filter((s): s is string => typeof s === 'string' && s.length > 0).slice(0, MAX_SUBJECTS).map((s) => s.slice(0, 200))
@@ -525,8 +533,8 @@ export async function recordRun(
   await env.DB.prepare(
     `INSERT INTO runs (id, runner_id, org, job_id, project_slug, branch, started_at, finished_at,
                        outcome, iterations, commits, cost_usd, pr_url, failed_tier, agents, screenshots,
-                       gate_tiers, commit_subjects)
-     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)
+                       gate_tiers, commit_subjects, design_findings, audit_findings)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)
      ON CONFLICT (id) DO UPDATE SET
        finished_at = excluded.finished_at,
        outcome     = excluded.outcome,
@@ -538,7 +546,9 @@ export async function recordRun(
        agents      = COALESCE(excluded.agents, runs.agents),
        screenshots = COALESCE(excluded.screenshots, runs.screenshots),
        gate_tiers  = COALESCE(excluded.gate_tiers, runs.gate_tiers),
-       commit_subjects = COALESCE(excluded.commit_subjects, runs.commit_subjects)
+       commit_subjects = COALESCE(excluded.commit_subjects, runs.commit_subjects),
+       design_findings = COALESCE(excluded.design_findings, runs.design_findings),
+       audit_findings  = COALESCE(excluded.audit_findings, runs.audit_findings)
      WHERE runs.runner_id = excluded.runner_id`,
   )
     .bind(
@@ -550,6 +560,8 @@ export async function recordRun(
       screenshots.length ? JSON.stringify(screenshots) : null,
       tiers.length ? JSON.stringify(tiers) : null,
       subjects.length ? JSON.stringify(subjects) : null,
+      findings(body.designFindings),
+      findings(body.auditFindings),
     )
     .run()
 
@@ -618,7 +630,7 @@ export async function getRun(env: Env, org: string, runId: string): Promise<Resp
   return ok({ run: withLists({ ...run, agents }), live })
 }
 
-function jsonList(value: unknown): unknown[] {
+export function jsonList(value: unknown): unknown[] {
   try {
     const parsed: unknown = typeof value === 'string' ? JSON.parse(value) : []
     return Array.isArray(parsed) ? parsed : []
@@ -631,6 +643,10 @@ function jsonList(value: unknown): unknown[] {
 function withLists(row: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = { ...row, gate_tiers: jsonList(row['gate_tiers']) }
   if ('commit_subjects' in row) out['commit_subjects'] = jsonList(row['commit_subjects'])
+  // Null stays null: the pass did not run, which is not the same as clean.
+  for (const key of ['design_findings', 'audit_findings']) {
+    if (key in row) out[key] = row[key] === null ? null : jsonList(row[key])
+  }
   return out
 }
 

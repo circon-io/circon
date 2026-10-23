@@ -41,10 +41,16 @@ describe('sanitizing config', () => {
     assert.equal(errors.length, 2)
   })
 
-  test('only the planning step can be switched off', () => {
-    const { config, errors } = sanitizeConfig({ agents: { build: null, plan: null } })
-    assert.deepEqual(config, { agents: { plan: null } })
-    assert.equal(errors.length, 1)
+  test('only the optional steps, planning and the audit, can be switched off', () => {
+    const { config, errors } = sanitizeConfig({ agents: { build: null, review: null, plan: null, audit: null } })
+    assert.deepEqual(config, { agents: { plan: null, audit: null } })
+    assert.equal(errors.length, 2)
+  })
+
+  test('polish iterations are a small whole number', () => {
+    assert.deepEqual(sanitizeConfig({ polishIterations: 3 }).config, { polishIterations: 3 })
+    assert.equal(sanitizeConfig({ polishIterations: 2.5 }).errors.length, 1)
+    assert.equal(sanitizeConfig({ polishIterations: 50 }).errors.length, 1)
   })
 })
 

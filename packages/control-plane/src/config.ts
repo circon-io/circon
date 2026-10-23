@@ -13,7 +13,7 @@
 
 export type IosRunnerMode = 'none' | 'simulator' | 'device'
 export type AgentBackend = 'aider' | 'claude-code' | 'codex'
-export type AgentRole = 'plan' | 'build' | 'review'
+export type AgentRole = 'plan' | 'build' | 'review' | 'audit'
 
 export interface RoleSpec {
   backend: AgentBackend
@@ -32,13 +32,17 @@ export interface RunConfig {
   iosRunnerMode?: IosRunnerMode
   /** Gate tiers this runner or project must not run, e.g. a runner with no KVM. */
   skipTiers?: string[]
-  /** `plan: null` explicitly turns a planning step inherited from a lower layer off. */
+  /** `plan: null` or `audit: null` turns that step, inherited from a lower layer, off. */
   agents?: Partial<Record<AgentRole, RoleSpec | null>>
+  /** Iterations spent on the design review's findings once the PRD is done. 0 is off. */
+  polishIterations?: number
 }
 
 const TIERS = ['typecheck', 'unit tests', 'web UI', 'android UI', 'ios UI']
 const BACKENDS: AgentBackend[] = ['aider', 'claude-code', 'codex']
-const ROLES: AgentRole[] = ['plan', 'build', 'review']
+const ROLES: AgentRole[] = ['plan', 'build', 'review', 'audit']
+/** Roles that are optional steps, and so can be turned off. */
+const OPTIONAL_ROLES: AgentRole[] = ['plan', 'audit']
 const MODEL = /^[\w.:/@-]{1,80}$/
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -110,6 +114,11 @@ export function sanitizeConfig(input: unknown): { config: RunConfig; errors: str
         if (n !== undefined) config.verifyEvery = n
         break
       }
+      case 'polishIterations': {
+        const n = number(errors, key, value, { min: 0, max: 20, integer: true })
+        if (n !== undefined) config.polishIterations = n
+        break
+      }
       case 'iosRunnerMode':
         if (value === 'none' || value === 'simulator' || value === 'device') config.iosRunnerMode = value
         else errors.push('iosRunnerMode must be none, simulator or device')
@@ -133,7 +142,7 @@ export function sanitizeConfig(input: unknown): { config: RunConfig; errors: str
             continue
           }
           if (spec === undefined) continue
-          if (spec === null && role !== 'plan') {
+          if (spec === null && !OPTIONAL_ROLES.includes(role as AgentRole)) {
             errors.push(`agents.${role} cannot be turned off`)
             continue
           }
