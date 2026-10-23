@@ -285,9 +285,19 @@ in the dashboard or `config.json`, and `.circon/flows/ios.sh` implements each:
 - `simulator` — a **macOS runner**, natively. The gate skips it on Linux rather
   than failing, because that is a configuration mismatch, not bad code.
 - `device` on macOS — a cabled iPhone, built with Xcode, driven by agent-device.
-- `device` on Linux — the Codemagic `dev-client` IPA installed with go-ios;
-  WebDriverAgent opens it against the runner's Metro and serves the hierarchy.
-  agent-device drives physical iPhones through XCTest, which needs a Mac, so
-  this path does not use it.
+- `device` on Linux — the Codemagic `dev-client` IPA, built **unsigned**, and
+  Appium's unsigned WebDriverAgent build. **xtool** signs both for the phone on
+  the cable (it registers the device and makes the profile itself, from an App
+  Store Connect key in `~/.config/circon/apple.env`) and installs them; go-ios
+  runs WebDriverAgent, which opens the app against the runner's Metro and
+  serves the hierarchy. agent-device drives physical iPhones through XCTest,
+  which needs a Mac, so this path does not use it.
+  - **xtool rewrites bundle ids** to `XTL-<team>.<original>`, for paid accounts
+    too. `ios.sh` therefore looks both apps up on the phone (`installed_id`)
+    and never assumes the original id.
+  - xtool only signs and installs here. It cannot build an Expo app (it builds
+    SwiftPM packages), so the dev client is still built on a Mac, and a runner
+    never needs the iOS SDK it extracts from `Xcode.xip`.
+  - It is young and releases weekly: `PINNED.xtool`, moved by `setup --upgrade`.
 
 Web and Android feedback need no Apple hardware.

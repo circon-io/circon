@@ -1,8 +1,13 @@
 import { createInterface } from 'node:readline/promises'
+import { chmodSync, copyFileSync, existsSync, mkdirSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { join, resolve } from 'node:path'
 import { ui } from '../core/ui.ts'
 import { writeEnvFile, readEnvFile, writeConfig, readConfig } from '../core/config.ts'
 import { paths } from '../core/paths.ts'
 import { run, which } from '../core/exec.ts'
+import { currentPlatform } from '../components/types.ts'
+import { appleKey, xtoolLoginInput } from '../components/apple.ts'
 
 /**
  * Every credential the machine needs, asked once. Existing values are shown as
@@ -80,6 +85,8 @@ export async function configCommand(): Promise<number> {
       ui.ok(`Saved ${Object.keys(entries).length} project credential(s).`)
     }
 
+    if (currentPlatform() === 'linux') await askAppleKey(rl)
+
     ui.blank()
     ui.info('Conventions repository — Enter to keep the default')
     const repo = await ask(rl, 'Git URL', cfg.conventionsRepo)
@@ -92,4 +99,45 @@ export async function configCommand(): Promise<number> {
   } finally {
     rl.close()
   }
+}
+
+/**
+ * The App Store Connect API key xtool signs with, for a USB iPhone on a Linux
+ * runner. The .p8 is copied next to the other credentials, so a key left in
+ * ~/Downloads can be cleaned up without breaking the next login.
+ */
+async function askAppleKey(rl: ReturnType<typeof createInterface>): Promise<void> {
+  ui.blank()
+  ui.info('Apple — an App Store Connect API key, for testing on a USB iPhone. Enter to skip')
+  ui.dim('  App Store Connect → Users and Access → Integrations → Team Keys, role App')
+  ui.dim('  Manager. xtool uses it to register the phone and sign the dev client.')
+  const current = appleKey()
+  const keyId = await ask(rl, 'Key ID', current?.keyId)
+  if (!keyId) return
+  const issuerId = await ask(rl, 'Issuer ID', current?.issuerId)
+  const given = await ask(rl, 'Path to the .p8 file', current?.keyPath)
+  if (!issuerId || !given) {
+    ui.warn('Key ID, issuer ID and the .p8 are all needed — skipped.')
+    return
+  }
+  const source = resolve(given.replace(/^~(?=\/|$)/, homedir()))
+  if (!existsSync(source)) {
+    ui.warn(`${source} does not exist — skipped.`)
+    return
+  }
+  mkdirSync(paths.config, { recursive: true })
+  const keyPath = join(paths.config, 'apple-asc-key.p8')
+  if (source !== keyPath) copyFileSync(source, keyPath)
+  chmodSync(keyPath, 0o600)
+  const key = { keyId, issuerId, keyPath }
+  writeEnvFile('apple', { APPLE_ASC_KEY_ID: keyId, APPLE_ASC_ISSUER_ID: issuerId, APPLE_ASC_KEY_PATH: keyPath }, 'App Store Connect API key (mode 0600)')
+
+  // Hand it to xtool now if it is installed; otherwise `circon setup` will.
+  const xtool = existsSync(join(paths.bin, 'xtool')) ? join(paths.bin, 'xtool') : await which('xtool')
+  if (!xtool) return
+  const changed = current?.keyId !== keyId || current?.issuerId !== issuerId
+  if (changed) await run(xtool, ['auth', 'logout'])
+  const login = await run(xtool, ['auth', 'login', '--mode', 'key'], { input: xtoolLoginInput(key), timeoutMs: 120_000 })
+  if (/^Logged in/m.test(login.stdout)) ui.ok('xtool logged in with the App Store Connect key.')
+  else ui.warn("xtool did not accept the key — check it, then run 'circon setup --only xtool'.")
 }

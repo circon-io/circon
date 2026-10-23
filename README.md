@@ -45,7 +45,7 @@ control plane open, reports heartbeats and live logs, and claims queued jobs.
 |---|---|
 | **AI** | Ollama + `qwen2.5-coder:7b`, aider, Claude Code (with the context7 MCP), OpenAI Codex |
 | **GPU** | NVIDIA drivers, CUDA toolkit, Ollama flash attention |
-| **Mobile** | Node 24, pnpm, Expo tooling, Android Studio, a headless Android SDK and a ready emulator |
+| **Mobile** | Node 24, pnpm, Expo tooling, Android Studio, a headless Android SDK and a ready emulator; on Linux, xtool, go-ios and WebDriverAgent for a USB iPhone |
 | **Containers** | Docker Engine, plus KVM for hardware-accelerated emulation |
 | **Remote** | OpenSSH |
 | **Service** | `circon agent` as a systemd user service (launchd on a Mac) |

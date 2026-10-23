@@ -22,6 +22,13 @@ export const PINNED = {
   /** Re-pulling this is a multi-GB mistake, so it is never implicit. */
   ollamaModel: 'qwen2.5-coder:7b',
   javaPackage: 'openjdk-17-jdk',
+  /**
+   * Signs and installs the dev client on a USB iPhone from Linux. Young and
+   * releasing weekly, so a runner stays on this until `setup --upgrade`.
+   */
+  xtool: '1.22.2',
+  /** Appium's unsigned real-device build; xtool signs it for the runner's phone. */
+  webDriverAgent: '16.15.3',
 } as const
 
 export const FLOATING = {

@@ -14,6 +14,7 @@ import {
 } from './workspace.ts'
 import {
   homebrewComponent, javaComponent, xcodeComponent, iosSimulatorComponent, iosDeviceComponent,
+  xtoolComponent, webDriverAgentComponent,
 } from './apple.ts'
 
 /**
@@ -35,6 +36,8 @@ export const components: Component[] = [
   xcodeComponent,
   iosSimulatorComponent,
   iosDeviceComponent,
+  xtoolComponent,
+  webDriverAgentComponent,
   aiderComponent,
   context7Component,
   ollamaComponent,

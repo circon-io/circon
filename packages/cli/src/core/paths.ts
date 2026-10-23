@@ -19,6 +19,14 @@ export const paths = {
   get state() {
     return join(home(), '.local', 'state', 'circon')
   },
+  /** Tools circon downloads itself rather than through a package manager. */
+  get share() {
+    return join(home(), '.local', 'share', 'circon')
+  },
+  /** On PATH through env.sh. */
+  get bin() {
+    return join(home(), '.local', 'bin')
+  },
   get workspace() {
     return join(home(), 'AI-Workspace')
   },

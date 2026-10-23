@@ -87,7 +87,7 @@ The clients hold no secrets and enforce nothing. Every rule is enforced by
 
 | Runner OS | Web | Android | iOS |
 |---|---|---|---|
-| Linux (NVIDIA) | Expo web, accessibility tree | emulator (KVM) | USB device: dev-client IPA from Codemagic, installed with go-ios |
+| Linux (NVIDIA) | Expo web, accessibility tree | emulator (KVM) | USB device: unsigned dev-client IPA from Codemagic, signed for the phone and installed by xtool |
 | macOS | Expo web, accessibility tree | emulator | simulator, or a USB device |
 
 The reasons Linux cannot use the iOS simulator are recorded in [CLAUDE.md](CLAUDE.md).

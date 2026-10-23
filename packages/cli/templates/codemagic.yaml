@@ -7,8 +7,10 @@
 #   - environment variable groups:
 #       app_env      EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY, EXPO_PUBLIC_API_URL
 #       google_play  GCLOUD_SERVICE_ACCOUNT_CREDENTIALS
-#   - for ad-hoc builds, register test devices' UDIDs *before* building:
-#     a phone added later needs a new build.
+#
+# The dev client is built unsigned: the runner signs it for its own iPhone with
+# xtool, so no test device is ever registered here and a new phone needs no
+# new build.
 
 definitions:
   install: &install
@@ -29,18 +31,13 @@ workflows:
   # rebuilt only when native code or a native dependency changes. This is what
   # the USB-iPhone gate tier installs.
   dev-client:
-    name: iOS dev client (ad hoc)
+    name: iOS dev client (unsigned)
     max_build_duration: 60
     instance_type: mac_mini_m2
-    integrations:
-      app_store_connect: codemagic
     environment:
       node: 24
       groups:
         - app_env
-      ios_signing:
-        distribution_type: ad_hoc
-        bundle_identifier: __BUNDLE_ID__
     scripts:
       - *install
       - name: Generate the iOS project with the dev client
@@ -48,9 +45,19 @@ workflows:
           cd apps/mobile
           npx expo prebuild --platform ios --no-install
           cd ios && pod install
-      - *ios_ipa
+      - name: Build the dev client without signing it
+        script: |
+          cd apps/mobile/ios
+          WORKSPACE="$(ls -d *.xcworkspace | head -1)"
+          xcodebuild -workspace "$WORKSPACE" -scheme "${WORKSPACE%.xcworkspace}" \
+            -configuration Debug -sdk iphoneos -destination 'generic/platform=iOS' \
+            -derivedDataPath build/derived \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build
+          mkdir -p build/dev-client/Payload
+          cp -R build/derived/Build/Products/Debug-iphoneos/*.app build/dev-client/Payload/
+          (cd build/dev-client && zip -qry ios-dev-client.ipa Payload)
     artifacts:
-      - apps/mobile/ios/build/ios/ipa/*.ipa
+      - apps/mobile/ios/build/dev-client/ios-dev-client.ipa
 
   # Triggered by the release workflow once a release is approved.
   release:
